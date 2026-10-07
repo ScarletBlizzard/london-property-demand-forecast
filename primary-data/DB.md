@@ -48,7 +48,7 @@ engine = create_engine(
     "?sslmode=require".format(password=os.environ["PRIMARY_DB_PASSWORD"])
 )
 
-df = pd.read_sql("select * from primary.<table> limit 100", engine)
+df = pd.read_sql('select * from "primary".<table> limit 100', engine)
 ```
 
 </details>
