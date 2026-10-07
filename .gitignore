@@ -1,0 +1,14 @@
+# Скачанные выгрузки источников
+primary-data/loaders/*/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Локальные настройки окружения
+.env
+
+# macOS
+.DS_Store

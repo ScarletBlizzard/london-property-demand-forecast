@@ -21,6 +21,22 @@ PostgreSQL в Yandex Cloud. Первичные данные лежат в схе
 ## Быстрый старт
 
 <details>
+<summary>~/.pgpass — чтобы не вводить пароль каждый раз</summary>
+
+`psql` (используется в некоторых лоадерах первичных данных) - берет пароль подключения к БД из ~/.pgpass:
+
+```bash
+umask 077
+echo 'rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net:6432:106-primary:team-member:ПАРОЛЬ' >> ~/.pgpass
+chmod 600 ~/.pgpass
+```
+
+Двоеточие и обратный слэш внутри пароля нужно экранировать обратным слэшем:
+`a:b` записывается как `a\:b`. 
+
+</details>
+
+<details>
 <summary>psql</summary>
 
 ```bash
@@ -37,15 +53,14 @@ psql "host=rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net \
 <summary>Python (SQLAlchemy + pandas)</summary>
 
 ```python
-import os
-
 import pandas as pd
 from sqlalchemy import create_engine
 
+# Пароль берётся из ~/.pgpass (или из PGPASSWORD) — так же, как psql.
 engine = create_engine(
-    "postgresql+psycopg2://team-member:{password}@"
+    "postgresql+psycopg2://team-member@"
     "rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net:6432/106-primary"
-    "?sslmode=require".format(password=os.environ["PRIMARY_DB_PASSWORD"])
+    "?sslmode=require"
 )
 
 df = pd.read_sql('select * from "primary".<table> limit 100', engine)
