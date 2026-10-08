@@ -17,11 +17,7 @@ TBL='"primary".hm_land_registry__price_paid'
 CSV=data/pp-$YEAR.csv
 LONDON=data/london.csv
 
-export PGHOST=${PGHOST:-rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net}
-export PGPORT=${PGPORT:-6432}
-export PGDATABASE=${PGDATABASE:-106-primary}
-export PGUSER=${PGUSER:-team-member}
-export PGSSLMODE=require
+source ../../db.env
 
 mkdir -p data
 
