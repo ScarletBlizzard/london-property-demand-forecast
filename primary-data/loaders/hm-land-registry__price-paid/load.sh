@@ -11,11 +11,7 @@ CSV=data/pp-complete.csv
 LONDON=data/london.csv
 RELOAD=${RELOAD:-0}
 
-export PGHOST=${PGHOST:-rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net}
-export PGPORT=${PGPORT:-6432}
-export PGDATABASE=${PGDATABASE:-106-primary}
-export PGUSER=${PGUSER:-team-member}
-export PGSSLMODE=require
+source ../../db.env
 
 mkdir -p data
 
