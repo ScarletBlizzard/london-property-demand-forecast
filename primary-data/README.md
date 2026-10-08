@@ -26,6 +26,16 @@
 | **Данные** | [gov.uk — price paid data downloads](https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads) |
 | **Лицензия** | [Open Government License v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/) |
 
+**Таблица:** `"primary".hm_land_registry__price_paid` — ~4.0 млн сделок, 1995 — н. в.,
+33 района (32 боро + City of London).
+
+Как загрузить и обновлять —
+[README загрузчика](loaders/hm-land-registry__price-paid/README.md).
+
+> [!NOTE]
+> Данные досылаются с лагом в несколько месяцев: последние 1–2 месяца в выборке
+> занижены. Для прогноза хвост лучше отбрасывать.
+
 ## ⚡ Energy Performance Certificates
 
 Энергетические сертификаты жилых и нежилых зданий, а также общественных зданий Англии и Уэльса.
