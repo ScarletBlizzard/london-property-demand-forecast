@@ -9,17 +9,14 @@ PostgreSQL на серваке @overcoded (уехали на него после
 
 ## Параметры подключения
 
-| Параметр | Значение |
-| --- | --- |
-| Host | `212.26.253.190` |
-| Port | `48723` |
-| Database | `106-primary` |
-| Schema | `primary` |
-| Username | `team-member` |
-| Password | *в чате команды* |
+Хост, порт, база и пользователь (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSSLMODE`) лежат в одном месте — [db.env](db.env).
+Его подключают все лоадеры (`source ../../db.env`), при смене сервера правим только его. Пароль — в чате команды.
 
-Хост, порт, база и пользователь вынесены в [db.env](db.env) — его подключают все лоадеры
-(`source ../../db.env`), при смене сервера правим только его.
+Чтобы примеры ниже работали, загрузите параметры в текущую оболочку (из корня `primary-data/`):
+
+```bash
+source db.env
+```
 
 ## Быстрый старт
 
@@ -29,8 +26,9 @@ PostgreSQL на серваке @overcoded (уехали на него после
 `psql` (используется в некоторых лоадерах первичных данных) - берет пароль подключения к БД из ~/.pgpass:
 
 ```bash
+source db.env
 umask 077
-echo '212.26.253.190:48723:106-primary:team-member:ПАРОЛЬ' >> ~/.pgpass
+echo "$PGHOST:$PGPORT:$PGDATABASE:$PGUSER:ПАРОЛЬ" >> ~/.pgpass
 chmod 600 ~/.pgpass
 ```
 
@@ -42,12 +40,11 @@ chmod 600 ~/.pgpass
 <details>
 <summary>psql</summary>
 
+`psql` сам читает `PG*` из окружения:
+
 ```bash
-psql "host=212.26.253.190 \
-      port=48723 \
-      dbname=106-primary \
-      user=team-member \
-      sslmode=require"
+source db.env
+psql
 ```
 
 </details>
@@ -55,16 +52,14 @@ psql "host=212.26.253.190 \
 <details>
 <summary>Python (SQLAlchemy + pandas)</summary>
 
+Запускайте из оболочки, где выполнен `source db.env`: драйвер (libpq) берёт хост, порт, базу и пользователя
+из `PG*`, а пароль — из ~/.pgpass (или `PGPASSWORD`), так же, как `psql`.
+
 ```python
 import pandas as pd
 from sqlalchemy import create_engine
 
-# Пароль берётся из ~/.pgpass (или из PGPASSWORD) — так же, как psql.
-engine = create_engine(
-    "postgresql+psycopg2://team-member@"
-    "212.26.253.190:48723/106-primary"
-    "?sslmode=require"
-)
+engine = create_engine("postgresql+psycopg2://")
 
 df = pd.read_sql('select * from "primary".<table> limit 100', engine)
 ```
