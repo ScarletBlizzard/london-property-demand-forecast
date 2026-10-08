@@ -1,6 +1,6 @@
 # 🔌 БД первичных данных
 
-PostgreSQL в Yandex Cloud. Первичные данные лежат в схеме `primary` — по таблице на
+PostgreSQL на серваке @overcoded (уехали на него после потери ЦОДа в Я.Клауде). Первичные данные лежат в схеме `primary` — по таблице на
 [источник](README.md).
 
 > [!IMPORTANT]
@@ -11,8 +11,8 @@ PostgreSQL в Yandex Cloud. Первичные данные лежат в схе
 
 | Параметр | Значение |
 | --- | --- |
-| Host | `rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net` |
-| Port | `6432` |
+| Host | `212.26.253.190` |
+| Port | `48723` |
 | Database | `106-primary` |
 | Schema | `primary` |
 | Username | `team-member` |
@@ -27,7 +27,7 @@ PostgreSQL в Yandex Cloud. Первичные данные лежат в схе
 
 ```bash
 umask 077
-echo 'rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net:6432:106-primary:team-member:ПАРОЛЬ' >> ~/.pgpass
+echo '212.26.253.190:48723:106-primary:team-member:ПАРОЛЬ' >> ~/.pgpass
 chmod 600 ~/.pgpass
 ```
 
@@ -40,8 +40,8 @@ chmod 600 ~/.pgpass
 <summary>psql</summary>
 
 ```bash
-psql "host=rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net \
-      port=6432 \
+psql "host=212.26.253.190 \
+      port=48723 \
       dbname=106-primary \
       user=team-member \
       sslmode=require"
@@ -59,7 +59,7 @@ from sqlalchemy import create_engine
 # Пароль берётся из ~/.pgpass (или из PGPASSWORD) — так же, как psql.
 engine = create_engine(
     "postgresql+psycopg2://team-member@"
-    "rc1b-5l8v7vnu5f1or9d4.mdb.yandexcloud.net:6432/106-primary"
+    "212.26.253.190:48723/106-primary"
     "?sslmode=require"
 )
 
