@@ -52,7 +52,7 @@
 Greater London.
 
 Как загрузить и обновлять —
-[README загрузчика](loaders/energy-performance-certificates__certificates/README.md).
+[README загрузчика](loaders/energy-performance-certificates/README.md).
 
 ## 🚨 MPS Recorded Crime: Geographic Breakdown
 

@@ -9,7 +9,7 @@
 ## Токен API
 
 Нужен bearer-токен от [get-energy-performance-data.communities.gov.uk](https://get-energy-performance-data.communities.gov.uk).
-Токен лежит в `.env` рядом со скриптом (файл в `.gitignore`, **не коммитим**):
+Токен личный и для его получения требуется регистрация на сайте. Токен необходимо положить в `.env` рядом со скриптом:
 
 ```bash
 cp .env.example .env   # и впишите EPC_TOKEN
@@ -18,7 +18,7 @@ cp .env.example .env   # и впишите EPC_TOKEN
 ## Как пользоваться
 
 ```bash
-cd primary-data/loaders/energy-performance-certificates__certificates
+cd primary-data/loaders/energy-performance-certificates
 
 ./load.sh                # все три набора
 ./load.sh domestic       # один набор: domestic | non-domestic | display
@@ -31,7 +31,8 @@ cd primary-data/loaders/energy-performance-certificates__certificates
 Размеры архивов: domestic ~8 ГБ, non-domestic ~0,25 ГБ, display ~0,1 ГБ.
 Архив читается потоком (`unzip -p`), распаковка на диск не нужна.
 
-Чтобы залить в другую базу, переопределите `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`.
+Параметры подключения берутся из общего [db.env](../../db.env). Чтобы залить в другую базу,
+переопределите `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` в окружении.
 
 ## Что загружается
 
