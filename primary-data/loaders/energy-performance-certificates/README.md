@@ -26,7 +26,8 @@ cd primary-data/loaders/energy-performance-certificates
 
 Каждый запуск полностью заменяет таблицу — полный архив в источнике пересобирается
 1-го числа каждого месяца, поэтому запускать имеет смысл раз в месяц. Если архив не
-менялся (`lastUpdated` из `/info`), повторно он не скачивается.
+менялся (`lastUpdated` из `/info`), повторно он не скачивается. Прерванная загрузка
+на следующем запуске продолжается с того же места.
 
 Размеры архивов: domestic ~8 ГБ, non-domestic ~0,25 ГБ, display ~0,1 ГБ.
 Архив читается потоком (`unzip -p`), распаковка на диск не нужна.
@@ -37,9 +38,7 @@ cd primary-data/loaders/energy-performance-certificates
 ## Что загружается
 
 Только `certificates-*.csv` из архива. Файлы `recommendations-*.csv` (рекомендации по
-улучшению, без привязки к району) не грузим. Колонки — как в источнике, все `text`;
-типы приводим при сборке датасета. Индексы: `local_authority`, `postcode`
-(джойн с Price Paid по почтовому индексу).
+улучшению, без привязки к району) не грузим.
 
 ## Файлы
 
@@ -47,5 +46,8 @@ cd primary-data/loaders/energy-performance-certificates
 | --- | --- |
 | `load.sh` | скачивание, фильтр, заливка |
 | `lib/filter_london.py` | отбор Greater London из склеенных годовых CSV |
+| `sql/ddl_domestic.sql` | схема, первичный ключ и индексы `epc__domestic` |
+| `sql/ddl_non_domestic.sql` | то же для `epc__non_domestic` |
+| `sql/ddl_display.sql` | то же для `epc__display` |
 | `sql/verify.sql` | итоговая сводка по таблице |
 | `.env.example` | шаблон для `.env` с токеном |

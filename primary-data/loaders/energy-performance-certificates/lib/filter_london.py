@@ -6,7 +6,7 @@
 import csv
 import sys
 
-writer = csv.writer(sys.stdout, quoting=csv.QUOTE_ALL, lineterminator="\n")
+writer = csv.writer(sys.stdout, lineterminator="\n")
 reader = csv.reader(sys.stdin, strict=True)
 
 header = next(reader)
