@@ -25,9 +25,9 @@ curl -fL -C - --retry 3 --retry-delay 5 -o "$CSV" "$URL"
 printf '%s\n' "$LAST_MODIFIED" > "$CSV.version"
 
 echo "==> Создаю таблицу"
-psql -w -v ON_ERROR_STOP=1 -q -f sql/ddl.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -f sql/ddl.sql
 
-ROWS=$(psql -w -v ON_ERROR_STOP=1 -At -c "select count(*) from $TBL")
+ROWS=$(psql "$PGCONN" -w -v ON_ERROR_STOP=1 -At -c "select count(*) from $TBL")
 if [ "$ROWS" != 0 ] && [ "$RELOAD" != 1 ]; then
     echo "В таблице уже $ROWS строк. Чтобы перезалить: RELOAD=1 $0" >&2
     exit 1
@@ -37,15 +37,15 @@ echo "==> Отбираю Greater London"
 python3 lib/filter_london.py "$CSV" > "$LONDON"
 
 echo "==> Заливаю в $TBL"
-psql -w -v ON_ERROR_STOP=1 --single-transaction \
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 --single-transaction \
      -c "truncate $TBL" \
      -c "\\copy $TBL from '$LONDON' with (format csv)"
 
 echo "==> Строю индексы и первичный ключ"
-psql -w -v ON_ERROR_STOP=1 -q -f sql/indexes.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -f sql/indexes.sql
 
 echo "==> Обновляю статистику"
-psql -w -v ON_ERROR_STOP=1 -q -c "analyze $TBL"
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -c "analyze $TBL"
 
 echo "==> Результат"
-psql -w -v ON_ERROR_STOP=1 -f sql/verify.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -f sql/verify.sql

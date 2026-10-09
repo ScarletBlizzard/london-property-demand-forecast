@@ -46,8 +46,7 @@ cd primary-data/loaders/energy-performance-certificates
 | --- | --- |
 | `load.sh` | скачивание, фильтр, заливка |
 | `lib/filter_london.py` | отбор Greater London из склеенных годовых CSV |
-| `sql/ddl_domestic.sql` | схема, первичный ключ и индексы `epc__domestic` |
-| `sql/ddl_non_domestic.sql` | то же для `epc__non_domestic` |
-| `sql/ddl_display.sql` | то же для `epc__display` |
+| `sql/ddl_<набор>.sql` | схема таблицы `epc__<набор>`, снятие ключа и индексов перед заливкой |
+| `sql/indexes_<набор>.sql` | первичный ключ и индексы, собираются после `\copy` |
 | `sql/verify.sql` | итоговая сводка по таблице |
 | `.env.example` | шаблон для `.env` с токеном |

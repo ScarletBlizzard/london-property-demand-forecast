@@ -4,7 +4,7 @@
 -- https://get-energy-performance-data.communities.gov.uk/guidance
 
 create table if not exists "primary".epc__non_domestic (
-    certificate_number          text primary key,
+    certificate_number          text,
     address1                    text,
     address2                    text,
     address3                    text,
@@ -46,8 +46,11 @@ create table if not exists "primary".epc__non_domestic (
 );
 
 comment on table "primary".epc__non_domestic is
-    'Energy Performance Certificates, набор non-domestic, только Greater London';
+    'Energy Performance Certificates, набор non-domestic, certificates-*.csv. '
+    'Отфильтровано local_authority like ''E09%'' (33 района Greater London). '
+    'Колонки и значения как в источнике, без очистки. Все поля text. OGL v3.0.';
 
--- Рабочие индексы: срезы по району и джойн с price paid по почтовому индексу.
-create index if not exists epc__non_domestic_local_authority_idx on "primary".epc__non_domestic (local_authority);
-create index if not exists epc__non_domestic_postcode_idx on "primary".epc__non_domestic (postcode);
+-- Ключ и индексы снимаем перед заливкой, собираем после — sql/indexes_non_domestic.sql.
+alter table "primary".epc__non_domestic drop constraint if exists epc__non_domestic_pkey;
+drop index if exists "primary".epc__non_domestic_local_authority_idx;
+drop index if exists "primary".epc__non_domestic_postcode_idx;

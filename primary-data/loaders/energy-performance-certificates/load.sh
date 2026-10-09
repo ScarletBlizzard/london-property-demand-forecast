@@ -37,17 +37,18 @@ load() {
     unzip -p "$zip" 'certificates-*.csv' | python3 -I lib/filter_london.py > "$csv"
 
     echo "==> [$set] Заливаю в $tbl"
-    psql -w -v ON_ERROR_STOP=1 --single-transaction -q \
+    psql "$PGCONN" -w -v ON_ERROR_STOP=1 --single-transaction -q \
          -c "set client_min_messages = warning" \
          -c "set statement_timeout = '4h'" \
          -f "sql/ddl_$name.sql" \
          -c "truncate $tbl" \
-         -c "\\copy $tbl from '$csv' with (format csv, header)"
+         -c "\\copy $tbl from '$csv' with (format csv, header)" \
+         -f "sql/indexes_$name.sql"
 
     echo "==> [$set] Обновляю статистику"
-    psql -w -v ON_ERROR_STOP=1 -q -c "analyze $tbl"
+    psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -c "analyze $tbl"
 
-    psql -w -v ON_ERROR_STOP=1 -v tbl="$tbl" -f sql/verify.sql
+    psql "$PGCONN" -w -v ON_ERROR_STOP=1 -v tbl="$tbl" -f sql/verify.sql
 }
 
 if [ $# -gt 0 ]; then SETS=("$1"); else SETS=(display non-domestic domestic); fi
