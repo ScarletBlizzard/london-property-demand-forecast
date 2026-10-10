@@ -31,16 +31,16 @@ curl -fL -C - --retry 3 --retry-delay 5 -o "$CSV" "$URL"
 printf '%s\n' "$LAST_MODIFIED" > "$CSV.version"
 
 echo "==> Проверяю схему"
-psql -w -v ON_ERROR_STOP=1 -q -f sql/ddl.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -f sql/ddl.sql
 
 echo "==> Отбираю Greater London"
 python3 lib/filter_london.py "$CSV" > "$LONDON"
 
 echo "==> Заменяю $YEAR"
-psql -w -v ON_ERROR_STOP=1 -v y="$YEAR-01-01" -f sql/replace_year.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -v y="$YEAR-01-01" -f sql/replace_year.sql
 
 echo "==> Обновляю статистику"
-psql -w -v ON_ERROR_STOP=1 -q -c "analyze $TBL"
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -q -c "analyze $TBL"
 
 echo "==> Результат"
-psql -w -v ON_ERROR_STOP=1 -f sql/verify.sql
+psql "$PGCONN" -w -v ON_ERROR_STOP=1 -f sql/verify.sql

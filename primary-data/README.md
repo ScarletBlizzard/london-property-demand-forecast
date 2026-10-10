@@ -43,10 +43,16 @@
 | | |
 | --- | --- |
 | **Владелец** | UK Government |
-| **Покрытие** | Англия и Уэльс |
+| **Покрытие** | Англия и Уэльс, данные с 2008 (запуск реестра) |
 | **Формат** | CSV |
 | **Данные** | [get-energy-performance-data.communities.gov.uk](https://get-energy-performance-data.communities.gov.uk) |
 | **Лицензия** | [Open Government License v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/) |
+
+**Таблицы:** `"primary".epc__domestic`, `epc__non_domestic`, `epc__display` — только
+Greater London.
+
+Как загрузить и обновлять —
+[README загрузчика](loaders/energy-performance-certificates/README.md).
 
 ## 🚨 MPS Recorded Crime: Geographic Breakdown
 
