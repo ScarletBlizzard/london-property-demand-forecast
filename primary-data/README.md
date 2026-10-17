@@ -149,3 +149,45 @@ Greater London.
 `V2Tone` — тональность статьи целиком, а не отдельного фрагмента о недвижимости. Упоминание
 Лондона также не гарантирует географическую привязку к конкретному боро. Эти записи можно
 использовать для новостных признаков по Лондону, а месячные признаки формировать на следующем шаге.
+
+## 🚇 TfL — Public Transport Accessibility Levels (PTAL)
+
+Индекс транспортной доступности Лондона от Transport for London. Считается из времени
+пешком до остановок и станций, частоты сообщения на них и среднего времени ожидания;
+скорость поездки, пересадки и загруженность транспорта не учитываются. Публикуется в
+двух видах: непрерывный Accessibility Index и его разбивка на категории 0…6b.
+
+| | |
+| --- | --- |
+| **Владелец** | Transport for London |
+| **Покрытие** | Greater London целиком; статический срез, не ряд |
+| **География** | сетка 100×100 м, LSOA, MSOA, Ward |
+| **Формат** | CSV (также GeoJSON, Shapefile, ArcGIS REST) |
+| **Данные** | [релиз 2023 — ArcGIS-портал TfL](https://gis-tfl.opendata.arcgis.com/datasets/TfL::lsoa-aggregated-ptal-stats-2023) · [релиз 2015 — London Datastore](https://data.london.gov.uk/dataset/public-transport-accessibility-levels-24rz6) · [методика расчёта](https://data.london.gov.uk/download/24rz6/86bbffe1-8af1-49ba-ac9b-b3eacaf68137/connectivity-assessment-guide.pdf) |
+| **Лицензия** | релиз 2023 — [OGL v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/), `Contains OS data © Crown copyright and database right 2023`; релиз 2015 — [OGL v2.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/2/) |
+
+**Таблицы:** `"primary".tfl__ptal_lsoa_2023` — 4 994 LSOA по границам 2021 года,
+`"primary".tfl__ptal_lsoa_2015` — 4 835 LSOA по границам 2011 года.
+
+Рабочий признак — релиз 2023. Релиз 2015 посчитан по периоду 2008–2014 и не знает ни
+Elizabeth line, ни продления Northern line до Battersea, ни Barking Riverside; он нужен
+только для сопоставления двух срезов.
+
+Грузим уровень LSOA, а не боро: до боро сворачивается запросом, обратно — нет. На уровне
+боро признак почти бесполезен — `AvPTAI` коррелирует с долей квартир в сделках.
+Ценность PTAL в том, что он **экзогенен**:
+доля квартир и медианная цена выводятся из тех же сделок, которые мы предсказываем, и в
+сервисе их на будущий месяц взять негде, а PTAL может подставляться в прогноз на любую дату.
+
+Как загрузить и обновлять — [README загрузчика](loaders/tfl__ptal/README.md).
+
+> [!WARNING]
+> В релизе 2023 колонка `borough` битая: атрибуция расходится у 434 LSOA из 4 994 (8,7%),
+> всегда на соседний боро. Боро надо выводить из `lsoa21nm` или из официального lookup
+> LSOA21 → LAD с [geoportal.statistics.gov.uk](https://geoportal.statistics.gov.uk).
+>
+> Разницу между релизами нельзя трактовать как изменение доступности: она смешивает
+> новую инфраструктуру с сокращением автобусного обслуживания после пандемии и
+> возможными правками методики. У Wandsworth AI падает на 13%, хотя в сентябре 2021
+> там открыли две новые станции Northern line. Для временной оси надёжнее кодировать
+> даты открытия линий руками.
