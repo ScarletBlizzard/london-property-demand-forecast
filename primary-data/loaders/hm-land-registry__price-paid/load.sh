@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Полная загрузка HM Land Registry — Price Paid Data (Greater London) 
+# Полная загрузка HM Land Registry — Price Paid Data (Greater London)
 # в таблицу "primary".hm_land_registry__price_paid.
 set -euo pipefail
 cd "$(dirname "$0")"

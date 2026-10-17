@@ -116,6 +116,39 @@ uv remove --group notebooks <пакет>   # удалить из группы, �
 Ставить что-либо по подсказке VS Code не нужно — всё ставится через `uv add`, иначе
 окружение разъедется с `uv.lock`.
 
+## ✅ Проверки перед коммитом
+
+Код проверяется [pre-commit](https://pre-commit.com): на `git commit` по изменённым файлам
+прогоняются `ruff` (линтер и форматтер Python), `shellcheck` (загрузчики на bash) и набор
+базовых проверок — лишние пробелы, перенос в конце файла, следы конфликтов, случайный
+коммит большого файла. Список хуков — в `.pre-commit-config.yaml`.
+
+> [!IMPORTANT]
+> Хук живёт в `.git/`, с клоном он не приезжает. После `uv sync` его нужно поставить
+> **один раз на каждой тачке**, иначе проверки будут молча не работать:
+
+```bash
+uv run pre-commit install                      # поставить git-хук (один раз на тачке)
+uv run pre-commit autoupdate                   # обновить версии хуков
+```
+
+Прогнать проверки вручную, не делая коммит:
+
+```bash
+uv run pre-commit run --all-files              # по всему репозиторию
+uv run pre-commit run                          # только по файлам из git add
+uv run pre-commit run --files README.md        # по конкретным файлам
+uv run pre-commit run ruff-format --all-files  # один хук по имени из конфига
+uv run pre-commit run --all-files --show-diff-on-failure   # показать, что именно хук переписал
+```
+
+Если хук изменил файлы (например, убрал пробелы), коммит не создаётся: нужно проверить
+правки, сделать `git add` и повторить `git commit`.
+
+Линтер и форматтер можно вызвать напрямую — `uv run ruff check .`, `uv run ruff format .`.
+Версия ruff при этом берётся из dev-группы `pyproject.toml`, а не из `rev` в
+`.pre-commit-config.yaml`; сейчас они совпадают, но после `pre-commit autoupdate` могут разъехаться.
+
 ## 📂 Структура репозитория
 
 ```
@@ -130,8 +163,9 @@ london-property-demand-forecast/
 ├── notebooks/                               # ноутбуки ipynb
 │   └── EDA.ipynb                            # разведочный анализ
 ├── docs/                                    # документы проекта
-│   ├── practical-value.md                   # практическая ценность проекта (md)
+│   └── practical-value.md                   # практическая ценность проекта (md)
 ├── pyproject.toml                           # метаданные проекта и зависимости
+├── .pre-commit-config.yaml                  # проверки перед коммитом
 ├── uv.lock                                  # зафиксированные версии пакетов
 ├── .python-version                          # версия Python для uv
 ├── .gitignore
@@ -154,3 +188,4 @@ london-property-demand-forecast/
 
 - Основная ветка для разработки — `dev`, в `main` мержим к чекпоинтам.
 - Изменения вливаются через Pull Request с ревью команды (1–2 апрува).
+- Перед коммитом обязательно пройти [проверки pre-commit](#-проверки-перед-коммитом)

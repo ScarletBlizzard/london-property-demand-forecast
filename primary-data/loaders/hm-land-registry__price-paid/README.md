@@ -1,6 +1,6 @@
 # 🏠 Загрузчик: HM Land Registry — Price Paid Data
 
-Наполняет таблицу `"primary".hm_land_registry__price_paid` сделками с недвижимостью 
+Наполняет таблицу `"primary".hm_land_registry__price_paid` сделками с недвижимостью
 по Лондону. Подключение к БД и пароль — в [DB.md](../../DB.md).
 
 Нужны `psql` и `python3`, сторонние библиотеки не требуются.
