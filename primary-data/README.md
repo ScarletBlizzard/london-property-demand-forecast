@@ -191,3 +191,46 @@ Elizabeth line, ни продления Northern line до Battersea, ни Barki
 > возможными правками методики. У Wandsworth AI падает на 13%, хотя в сентябре 2021
 > там открыли две новые станции Northern line. Для временной оси надёжнее кодировать
 > даты открытия линий руками.
+
+## 🏷️ HMRC — Monthly property transactions (£40 000+)
+
+Число завершённых сделок с недвижимостью по Великобритании за месяц — по данным налоговых
+баз SDLT (HMRC), LBTT (Revenue Scotland) и LTT (Welsh Revenue Authority). Сделка считается
+по дате завершения (completion) и попадает в статистику только при стоимости выше £40 000.
+Общенациональный индикатор активности рынка: быстрее Land Registry, но без разбивки по районам.
+
+| | |
+| --- | --- |
+| **Владелец** | HM Revenue & Customs |
+| **Покрытие** | Великобритания, апрель 2005 — н. в., месячная гранулярность |
+| **География** | нет разбивки по районам — только UK целиком и четыре страны (Англия, Шотландия, Уэльс, Северная Ирландия) |
+| **Формат** | ODS (одна книга, имя файла меняется с каждым релизом) |
+| **Данные** | [gov.uk — monthly property transactions](https://www.gov.uk/government/statistics/monthly-property-transactions-completed-in-the-uk-with-value-40000-or-above) · [методика](https://www.gov.uk/government/statistics/monthly-property-transactions-completed-in-the-uk-with-value-40000-or-above/uk-monthly-property-transactions-background-and-references) |
+| **Лицензия** | [Open Government License v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/) |
+
+**Таблица:** `"primary".hmrc__property_transactions` — 257 месяцев, апрель 2005 — н. в.,
+только лист `Residential_monthly` (жилая недвижимость). Квартальные, финансовые годы и
+нежилую недвижимость из той же книги не грузим.
+
+Как загрузить и обновлять — [README загрузчика](loaders/hmrc__property-transactions/README.md).
+
+> [!WARNING]
+> **Три последних месяца ряда предварительные** и в следующих релизах изменятся:
+> последний считается по снимку базы SDLT с дотяжкой на неполученные декларации
+> (`[provisional estimates]`), два предыдущих ещё не устоялись (`[provisional]`).
+> Пометка в источнике написана прямо в поле с датой — `August 2026 [provisional estimates]` —
+> и наивный разбор даты молча выбрасывает три самых свежих месяца. В таблице признак
+> вынесен в колонку `provisional`; для обучения модели эти месяцы лучше отбрасывать.
+>
+> Ссылку на файл нельзя зашивать: имя вложения меняется с каждым релизом
+> (`MPT_Tab_Sep_26.ods`), загрузчик каждый раз вытаскивает её со страницы публикации.
+
+> [!NOTE]
+> Все значения — число сделок, округлённое до десятков. Пояснение на самом листе
+> («rounded and reported by thousand transactions») вводит в заблуждение: это не тысячи
+> сделок, домножать ни на что не надо.
+>
+> Шотландия с апреля 2015 и Уэльс с апреля 2018 приходят не из базы HMRC, а фидами от
+> Revenue Scotland и WRA — разрыв методики на этих датах заложен в сам ряд. Колонка
+> `uk_seasonally_adjusted` — сезонно сглаженный итог по Великобритании (X-13ARIMA);
+> по странам сглаженных рядов источник не даёт.
