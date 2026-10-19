@@ -22,6 +22,10 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=2048]
       - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
+        # Редакторы ноутбуков сохраняют .ipynb без финального перевода строки,
+        # хук его дописывает — и так по кругу на каждом коммите
+        exclude: \.ipynb$
       - id: check-merge-conflict
       - id: check-yaml
