@@ -1,4 +1,10 @@
-"""Lossless ingestion, complete catalogue pagination and resumable downloads."""
+# Быстрые тесты загрузчика BoE без настоящих запросов к сайту и без PostgreSQL. Вместо
+# внешних сервисов здесь используются небольшие подготовленные CSV, XML и страницы
+# каталога.
+#
+# Проверяется сохранение исходных значений, полнота каталога и истории, продолжение
+# скачивания и реакция на сетевые ошибки. Эти тесты удобно запускать после изменений
+# кода. Проверки с настоящей локальной БД находятся в check_local.py.
 
 import csv
 import hashlib
@@ -24,6 +30,7 @@ loader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(loader)
 
 
+# Создаёт небольшую HTML-страницу каталога с нужными кодами и номерами результатов.
 def catalogue_page(number, first, last, total, codes, next_button=False):
     links = "".join(
         f'<a href="fromshowcolumns.asp?SeriesCodes={code}">{code}</a>' for code in codes
@@ -39,8 +46,8 @@ def catalogue_page(number, first, last, total, codes, next_button=False):
     ).encode()
 
 
+# Собирает полную тестовую выгрузку с повторами, пропусками и текстовыми значениями.
 def make_snapshot(folder):
-    """Small complete source fixture with duplicate rows and nonnumeric values."""
     files = {
         "catalog_form.html": b'<select name="Frequency"><option value="any">All</option><option value="M">Monthly</option></select>',
         "catalog_M_0001.html": catalogue_page(1, 1, 3, 3, ["A", "B", "EMPTY"]),
@@ -91,7 +98,10 @@ def make_snapshot(folder):
     return manifest
 
 
+# Проверяет чтение исходных данных, полноту выгрузки и обработку ошибок BoE.
 class RawTests(unittest.TestCase):
+    # Проверяет, что числа остаются текстом, а пустые значения и повторные строки
+    # сохраняются.
     def test_original_values_and_duplicates(self):
         rows = list(
             csv_rows(
@@ -104,6 +114,7 @@ class RawTests(unittest.TestCase):
             + [("31 Jan 2023", "B", ""), ("31 Jan 2023", "B", "..")],
         )
 
+    # Проверяет отказ при HTML вместо CSV, старом формате и повреждённых строках.
     def test_html_wide_and_malformed_csv_rejected(self):
         for raw in (
             b"<html>Error</html>",
@@ -114,6 +125,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaises((ValueError, csv.Error)):
                 list(csv_rows(raw))
 
+    # Проверяет, что CSV с незапрошенным рядом не принимается.
     def test_unrequested_series_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unexpected CSV series"):
             inspect_csv(
@@ -123,9 +135,12 @@ class RawTests(unittest.TestCase):
                 loader.date(2023, 12, 31),
             )
 
+    # Проверяет, что пустой CSV с правильным заголовком не превращается в выдуманные
+    # строки.
     def test_empty_period_keeps_a_valid_header_without_inventing_rows(self):
         self.assertEqual(list(csv_rows(b"DATE,SERIES,VALUE\r\r\n\r\n")), [])
 
+    # Проверяет полную выгрузку и обнаружение изменённого файла по контрольной сумме.
     def test_complete_snapshot_and_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -136,6 +151,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checksum"):
                 support.read_snapshot(folder, "bank-of-england")
 
+    # Проверяет отказ при незавершённой выгрузке или неподходящем старом формате.
     def test_partial_and_legacy_snapshots_cannot_load(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -144,6 +160,7 @@ class RawTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "completed all-series"):
                     loader.validate_snapshot(folder, dict(manifest, **updates))
 
+    # Проверяет, что отсутствие частоты или ряда в каталоге не остаётся незамеченным.
     def test_missing_frequency_or_series_is_detected(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -156,6 +173,7 @@ class RawTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     loader.validate_snapshot(folder, dict(manifest, **{field: value}))
 
+    # Проверяет, что одна CSV-часть не учитывается дважды.
     def test_duplicate_parts_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -164,6 +182,8 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Repeated"):
                 loader.validate_snapshot(folder, manifest)
 
+    # Проверяет потерю последней даты, которую одно сравнение количества строк не
+    # обнаружит.
     def test_missing_last_observation_is_detected_even_with_matching_counts(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -190,6 +210,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "published bounds"):
                 loader.validate_snapshot(folder, manifest)
 
+    # Проверяет обход страниц каталога за пределами видимых на сайте кнопок.
     def test_full_pagination_beyond_ui_limit(self):
         class Store:
             def __init__(self):
@@ -209,6 +230,7 @@ class RawTests(unittest.TestCase):
         result = discover(Store(), workers=1)
         self.assertEqual(result["M"]["codes"], [f"A{i}" for i in range(1, 18)])
 
+    # Проверяет повторное использование сохранённого ответа и отказ при его повреждении.
     def test_resume_uses_verified_cached_response(self):
         with tempfile.TemporaryDirectory() as directory:
             store = support.SnapshotStore(Path(directory))
@@ -230,6 +252,7 @@ class RawTests(unittest.TestCase):
                 )
                 self.assertEqual(fetch.call_count, 1)
 
+    # Проверяет, что готовые XML используются и после изменения размера запросов.
     def test_metadata_reuses_old_batch_sizes(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -246,6 +269,8 @@ class RawTests(unittest.TestCase):
             self.assertEqual(items, manifest["series"])
             self.assertEqual(files, ["metadata_cached.xml"])
 
+    # Проверяет, что ограничения запросов и ошибки доступа не вызывают дробление на
+    # новые запросы.
     def test_rate_limits_and_auth_errors_are_not_split_into_more_requests(self):
         for status in (401, 403, 404, 429):
             self.assertFalse(
@@ -255,6 +280,7 @@ class RawTests(unittest.TestCase):
             may_split(HTTPError("https://example.test", 500, "error", {}, None))
         )
 
+    # Проверяет повтор после обрыва соединения и отказ от сохранения неполного ответа.
     def test_connection_reset_and_incomplete_body_are_retried_without_saving_partial_data(
         self,
     ):
@@ -291,6 +317,7 @@ class RawTests(unittest.TestCase):
                     hashlib.sha256(b"complete").hexdigest(),
                 )
 
+    # Проверяет запрет удалённого сервера до попытки подключения в локальном режиме.
     def test_local_only_blocks_remote_before_connect(self):
         with (
             patch.object(

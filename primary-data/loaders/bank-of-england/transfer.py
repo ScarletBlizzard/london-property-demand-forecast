@@ -1,4 +1,10 @@
-"""Copy the complete raw BoE table from local PostgreSQL without contacting BoE."""
+# Команда для переноса готовой таблицы BoE из локального PostgreSQL в рабочую БД. Она
+# нужна, когда данные уже скачаны и повторно обращаться к сайту долго и незачем.
+#
+# Сохранённая выгрузка задаёт ожидаемые столбцы, число строк и даты, а сами значения
+# читаются из локальной БД. Общий механизм копирования находится в
+# nomis/_postgres_transfer.py; отсюда ему передаётся только таблица BoE. Параметр
+# --check-only запускает сверку без записи.
 
 import sys
 from pathlib import Path
@@ -6,13 +12,16 @@ from pathlib import Path
 from _boe_support import connection_settings, read_snapshot, run
 from load import COLUMNS, PREVIOUS_COLUMNS, TABLE, csv_rows, validate_snapshot
 
-# Reuse only the generic PostgreSQL transport; no Nomis tables or API code is imported.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "nomis"))
 from _postgres_transfer import arguments, transfer
 
 
+# Проверяет выгрузку BoE, собирает ожидаемую структуру и запускает перенос одной
+# таблицы.
 def main():
-    args = arguments(__doc__)
+    args = arguments(
+        "Copy the complete raw BoE table from local PostgreSQL without contacting BoE."
+    )
     manifest = read_snapshot(args.snapshot, "bank-of-england")
     validate_snapshot(args.snapshot, manifest)
     dates = {

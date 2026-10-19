@@ -1,4 +1,11 @@
-"""Download every public BoE catalogue series as original CSV and XML."""
+# Отсюда запускается загрузка Bank of England. Скрипт получает полный каталог рядов,
+# скачивает их описания и значения, а затем проверяет, что выгрузка не оборвалась на
+# середине.
+#
+# Можно только скачать файлы, продолжить прерванное скачивание или загрузить уже готовую
+# папку в PostgreSQL. В БД получается одна таблица primary.bank_of_england__raw с
+# исходными DATE, SERIES и VALUE. Старые данные заменяются только после проверки новой
+# выгрузки.
 
 import argparse
 import hashlib
@@ -35,8 +42,11 @@ PREVIOUS_COLUMNS = [
 ]
 
 
+# Читает параметры запуска и проверяет допустимый размер запросов.
 def arguments():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Download every public BoE catalogue series as original CSV and XML."
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--resume", type=Path, help="Continue an interrupted all-series download"
@@ -72,6 +82,7 @@ def arguments():
     return args
 
 
+# Открывает папку выгрузки и сохраняет прогресс даже при остановке с ошибкой.
 def download(args):
     store = SnapshotStore(DIRECTORY, args.resume)
     print(f"Raw files: {store.folder.resolve()}", flush=True)
@@ -81,6 +92,7 @@ def download(args):
         store.checkpoint()
 
 
+# По очереди собирает каталог, описания и CSV, затем отмечает выгрузку как полную.
 def download_into(store, args):
     if store.manifest.get("status") == "complete":
         validate_snapshot(store.folder, store.manifest)
@@ -107,6 +119,8 @@ def download_into(store, args):
     return store.folder, store.manifest
 
 
+# Сверяет файлы, каталог и границы истории: у каждого ряда должны быть все запрошенные
+# части.
 def validate_snapshot(folder, manifest, require_complete=True):
     if manifest.get("format_version") != 2 or (
         require_complete and manifest.get("status") != "complete"
@@ -209,8 +223,9 @@ def validate_snapshot(folder, manifest, require_complete=True):
     return rows
 
 
+# Копирует проверенные строки во временную таблицу и заменяет таблицу BoE одной
+# транзакцией.
 def replace_table(env_file, folder, manifest, local_only=False):
-    """Stage and atomically replace only this source's table, preserving raw text."""
     from psycopg import sql
 
     if local_only and connection_settings(env_file)["host"] not in (
@@ -263,6 +278,7 @@ def replace_table(env_file, folder, manifest, local_only=False):
     print(f'Loaded "primary".{TABLE}: {actual} rows, 3 original columns', flush=True)
 
 
+# Выбирает скачивание или готовую выгрузку и, если нужно, запускает запись в БД.
 def main():
     args = arguments()
     if args.snapshot:

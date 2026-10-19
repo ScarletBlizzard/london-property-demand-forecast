@@ -1,12 +1,24 @@
-"""Copy complete raw Nomis tables from local PostgreSQL, without using the Nomis API."""
+# Команда для переноса готовых таблиц Nomis из локальной БД в рабочую без повторного
+# скачивания. Она принимает одну или несколько папок выгрузок: например, три набора
+# могут быть в одной, а Claimant Count — в другой.
+#
+# По этим файлам проверяются ожидаемые столбцы, число строк и периоды. Сами значения
+# копируются из локального PostgreSQL в те же таблицы схемы primary. Сверку и
+# копирование выполняет _postgres_transfer.py; с --check-only команда ничего не
+# записывает.
 
 from _nomis_support import connection_settings, copy_batch, read_snapshot, run
 from _postgres_transfer import arguments, transfer
 from load import raw_tables
 
 
+# Собирает ожидаемые таблицы из полных выгрузок Nomis и передаёт их общему механизму
+# переноса.
 def main():
-    args = arguments(__doc__, multiple_snapshots=True)
+    args = arguments(
+        "Copy complete raw Nomis tables from local PostgreSQL, without using the Nomis API.",
+        multiple_snapshots=True,
+    )
     tables = {}
     for folder in args.snapshot:
         manifest = read_snapshot(folder, "nomis")

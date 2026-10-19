@@ -1,4 +1,10 @@
-"""Technical checks for lossless nomis CSV loading."""
+# Быстрые тесты Nomis, которым не нужны доступ к API и запущенный PostgreSQL. Ответы
+# источника и сбои сети подставляются в самом тесте, поэтому результат не зависит от
+# текущей публикации сайта.
+#
+# Здесь проверяются сохранение текста CSV/TSV, порядок страниц, состав плана и
+# продолжение скачивания. Отдельное внимание уделено пропускам, кавычкам APS и
+# историческим географиям. Настоящую запись в БД проверяют соседние файлы check_*.py.
 
 import csv
 import gzip
@@ -25,7 +31,10 @@ spec.loader.exec_module(loader)
 SOURCE = "nomis"
 
 
+# Проверяет чтение страниц Nomis, планирование полной выгрузки и восстановление после
+# сбоев.
 class RawTests(unittest.TestCase):
+    # Проверяет, что повторяются сбои соединения, а не ошибки SQL и прав доступа.
     def test_only_connection_failures_are_retried(self):
         import _nomis_database as database
         import psycopg
@@ -49,6 +58,7 @@ class RawTests(unittest.TestCase):
             database._network_error(psycopg.errors.OutOfMemory("out of memory"))
         )
 
+    # Проверяет повтор скачивания и точное восстановление ответа после распаковки gzip.
     def test_connection_reset_retries_and_gzip_retains_exact_response(self):
         raw = b"DATE,VALUE\r\n2023,001.2300\r\n"
         response = io.BytesIO(raw)
@@ -80,6 +90,7 @@ class RawTests(unittest.TestCase):
                 hashlib.sha256(raw).hexdigest(),
             )
 
+    # Проверяет сохранение кавычек внутри полей TSV и исходных пробелов.
     def test_nomis_tsv_preserves_literal_unescaped_quotes_and_whitespace(self):
         raw = b'"DATE"\t"VARIABLE_NAME"\t"OBS_VALUE"\n"2004-12"\t"% of economically inactive male student" "\t\n"2004-12"\t"a,b"\t001.2300\n'
         columns, rows = _support.read_tsv(raw, {"DATE", "OBS_VALUE"})
@@ -91,6 +102,7 @@ class RawTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _support.read_tsv(b'"DATE"\t"OBS_VALUE"\n"2004"\n', {"DATE"})
 
+    # Проверяет, что CSV не теряет пропуски, нули, формат чисел, кавычки и повторы.
     def test_csv_preserves_empty_zero_formatting_duplicates_and_quoted_text(self):
         raw = b'DATE,VALUE,NOTE\r\n31 Jan 2023,001.2300," a,b "\r\n31 Jan 2023,001.2300," a,b "\r\nunknown,,"line1\nline2"\r\nother,0,NA\r\nother,..,suppressed\r\n'
         columns, rows = _support.read_csv(raw, {"DATE"})
@@ -106,6 +118,7 @@ class RawTests(unittest.TestCase):
             ],
         )
 
+    # Проверяет отказ при повреждённом CSV и HTML вместо данных.
     def test_incomplete_csv_and_html_rejected(self):
         for raw in (
             b"<html>Error</html>",
@@ -116,6 +129,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaises((ValueError, csv.Error)):
                 _support.read_csv(raw, {"DATE", "V"})
 
+    # Проверяет источник выгрузки и обнаружение повреждённых файлов.
     def test_snapshot_checks_source_and_file_integrity(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -133,6 +147,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "checksum"):
                 _support.read_snapshot(folder, SOURCE)
 
+    # Проверяет чтение страниц без изменения полей и обнаружение пропущенных записей.
     def test_nomis_pages_keep_fields_and_detect_missing_rows(self):
         columns = [
             "DATE",
@@ -165,6 +180,7 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "incomplete"):
                 list(loader.raw_tables(folder, manifest)["nomis__labour_market_raw"][1])
 
+    # Проверяет совместное чтение географий с сохранением их строк, позиций и пропусков.
     def test_multiple_geographies_keep_original_offsets_empty_fields_and_duplicates(
         self,
     ):
@@ -217,6 +233,8 @@ class RawTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "incomplete"):
                 loader.raw_tables(folder, manifest)
 
+    # Проверяет включение всех категорий и нужной истории, а также выбор отдельного
+    # набора.
     def test_full_plan_has_all_dimensions_and_adds_raw_history(self):
         def code(values):
             return json.dumps(
@@ -319,7 +337,7 @@ class RawTests(unittest.TestCase):
             self.assertEqual(settings["categories"]["sex"], ["0", "1", "2"])
             self.assertEqual(manifest["record_count"], 1188)
             self.assertEqual(settings["queries"][0]["expected_record_count"], 792)
-            # A dataset selector must not fetch or load any other configured source.
+
             configs = json.loads((folder / "datasets.json").read_text())
             configs["NM_162_1"] = {"name": "Claimant count"}
             (folder / "datasets.json").write_text(json.dumps(configs))
@@ -352,6 +370,7 @@ class RawTests(unittest.TestCase):
             ):
                 downloader.plan(SimpleNamespace(from_year=None, to_year=None))
 
+    # Проверяет продолжение скачивания и остановку при смене публикации Nomis.
     def test_resume_downloads_only_missing_pages_and_checks_revisions(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
@@ -416,6 +435,7 @@ class RawTests(unittest.TestCase):
                 3,
             )
 
+    # Проверяет отказ при изменении числа строк и появлении территории вне Лондона.
     def test_count_changes_and_other_regions_are_rejected(self):
         columns = ["RECORD_OFFSET", "RECORD_COUNT", "GEOGRAPHY_CODE"]
         with self.assertRaises(ValueError):
@@ -423,6 +443,7 @@ class RawTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             downloader.check_page(columns, [("0", "2", "E08000001")], 0, 2)
 
+    # Проверяет допустимые сочетания выбора набора, готовой выгрузки и продолжения.
     def test_selected_dataset_checkpoint_and_snapshot_arguments(self):
         import _nomis_database as database
 

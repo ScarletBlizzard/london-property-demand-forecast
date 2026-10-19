@@ -1,4 +1,10 @@
-"""Enumerate every frequency and every page of the public BoE series catalogue."""
+# Чтобы скачать весь BoE, сначала нужно узнать коды всех доступных рядов. Этот модуль
+# собирает их из поисковой формы сайта: отдельно проходит дневные, месячные и остальные
+# частоты.
+#
+# Поиск разбит на страницы, причём сайт показывает не все кнопки перехода. Поэтому здесь
+# проверяются номера страниц и заявленное число результатов. На выходе получается
+# каталог кодов; сами значения показателей скачивает _boe_data.py.
 
 import re
 import urllib.error
@@ -10,7 +16,10 @@ from _boe_support import parallel_map
 BASE = "https://www.bankofengland.co.uk/boeapps/database/"
 
 
+# Разбирает страницу поиска: достаёт коды рядов, частоты и поля формы для следующего
+# запроса.
 class CatalogueHTML(HTMLParser):
+    # Подготавливает поля и сразу разбирает переданный HTML.
     def __init__(self, raw):
         super().__init__(convert_charrefs=True)
         self.text = []
@@ -23,6 +32,7 @@ class CatalogueHTML(HTMLParser):
         self.form = None
         self.feed(raw.decode("utf-8-sig"))
 
+    # Находит в HTML ссылки на ряды и элементы поисковой формы.
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if tag == "form":
@@ -44,6 +54,7 @@ class CatalogueHTML(HTMLParser):
                 if re.fullmatch(r"[A-Z0-9]+", code):
                     self.codes.append(code)
 
+    # Отмечает конец формы или списка, чтобы не смешивать их содержимое.
     def handle_endtag(self, tag):
         if tag == "form":
             self.form = None
@@ -52,18 +63,20 @@ class CatalogueHTML(HTMLParser):
         elif tag == "option":
             self.option = None
 
+    # Собирает видимый текст страницы и названия частот.
     def handle_data(self, data):
         self.text.append(data)
         if self.select == "Frequency" and self.option in self.frequencies:
             self.frequencies[self.option] += data.strip()
 
+    # Читает номер страницы и число результатов; отсутствие этих сведений считает
+    # ошибкой.
     def page(self):
         text = " ".join(" ".join(self.text).split())
         match = re.search(
             r"Page\s+(\d+),\s+results\s+(\d+)\s+to\s+(\d+)\s+of\s+(\d+)", text
         )
         if not match:
-            # An empty category still has to be confirmed by the source.
             if re.search(
                 r"(?:no (?:matching )?(?:data )?(?:series|results)|0 results)",
                 text,
@@ -76,11 +89,14 @@ class CatalogueHTML(HTMLParser):
         return tuple(map(int, match.groups()))
 
 
+# Обходит все частоты из формы BoE и возвращает полный каталог рядов.
 def discover(store, workers=2):
     form = CatalogueHTML(store.get(BASE + "advsearch.asp", "catalog_form.html"))
     if not form.frequencies:
         raise ValueError("No frequencies in the BoE catalogue form")
 
+    # Проходит страницы одной частоты и проверяет, что коды не пропущены и не
+    # повторяются.
     def frequency(item):
         code, label = item
         params = {
@@ -114,8 +130,7 @@ def discover(store, workers=2):
                 except urllib.error.URLError, TimeoutError:
                     if expected_page == 1:
                         raise
-                    # Both are native controls of the same form. Some Next URLs
-                    # intermittently return 500 while the numbered button works.
+
                     name = alternate
                     raw = store.get(
                         BASE + "FromShowColumns.asp?" + urlencode(button), name
@@ -146,9 +161,6 @@ def discover(store, workers=2):
             if last == total:
                 break
             if number >= 16:
-                # The UI only renders 16 buttons and 17 offsets even when the
-                # advertised result count is much larger. The same public form
-                # accepts the complete offset list and an explicit page button.
                 page_size = last - first + 1
                 pages = (total + page_size - 1) // page_size
                 params = dict(page.hidden)

@@ -1,4 +1,11 @@
-"""Exercise direct transfer against two disposable LOCAL PostgreSQL databases."""
+# Проверяет прямой перенос между PostgreSQL без API и больших исходных выгрузок. Для
+# проверки создаются две отдельные локальные БД: одна играет роль источника, другая —
+# назначения.
+#
+# На небольших таблицах проверяются точность полей, SQL NULL, повторы, пропуск
+# совпадающих данных и защита от потери истории. Отдельные сценарии проверяют откат при
+# ошибке и переход со старой структуры BoE. Нужны права на создание БД; обе тестовые
+# базы удаляются после завершения.
 
 import argparse
 import sys
@@ -15,8 +22,11 @@ import _postgres_transfer as transport
 from _nomis_support import connection_settings, copy_batch
 
 
+# Создаёт две тестовые БД и прогоняет успешный перенос, повторный запуск и ошибки.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Exercise direct transfer against two disposable LOCAL PostgreSQL databases."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     args = parser.parse_args()
     settings = transport.endpoint(connection_settings(args.env_file), local=True)
@@ -35,17 +45,21 @@ def main():
     spec = {"sample": {"columns": fields, "rows": len(rows), "dates": ["2020", "2021"]}}
     live = sql.Identifier("primary", "sample")
 
+    # Читает целевую тестовую таблицу с учётом числа повторяющихся строк.
     def read():
         with psycopg.connect(**dst) as conn:
             return Counter(
                 conn.execute(sql.SQL("SELECT * FROM {}").format(live)).fetchall()
             )
 
+    # Вызывает общий перенос с подготовленными тестовыми подключениями и описанием
+    # таблицы.
     def run(**kwargs):
         return transport.transfer(
             src, dst, spec, batch_size=1100, copy_batch=copy_batch, **kwargs
         )
 
+    # Проверяет, что опасная операция завершается ожидаемой ошибкой.
     def fails(operation, message):
         try:
             operation()
@@ -137,7 +151,6 @@ def main():
                 flush=True,
             )
 
-            # Detect altered rows after publication, then roll back the TRUNCATE/INSERT.
             with psycopg.connect(**dst) as conn:
                 conn.execute(
                     sql.SQL(
@@ -162,7 +175,6 @@ def main():
             assert read() == before
             print("PASS: final validation failure rolls back publication", flush=True)
 
-            # Same transport handles only the recognized former BoE schema.
             previous = [
                 "DATE",
                 "IUMABEDR",

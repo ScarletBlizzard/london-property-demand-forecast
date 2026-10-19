@@ -1,4 +1,11 @@
-"""Compare every raw CSV field with PostgreSQL in a disposable LOCAL database."""
+# Полная проверка чтения выгрузки Nomis и записи её полей в локальный PostgreSQL. Скрипт
+# создаёт отдельную тестовую БД, загружает туда данные и сравнивает все строки с
+# исходными, включая повторы.
+#
+# Дополнительно проверяются повторная загрузка, пропуски, сохранность посторонней
+# таблицы и откат при ошибке COPY. Сравнение держит строки в памяти, поэтому этот
+# вариант подходит для небольших тестовых выгрузок. Подключаться можно только локально;
+# тестовая БД удаляется после проверки.
 
 import argparse
 import contextlib
@@ -15,8 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_loader import SOURCE, _support, loader
 
 
+# Создаёт тестовую БД, проверяет загрузку и откат ошибок, затем удаляет эту БД.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Compare every raw CSV field with PostgreSQL in a disposable LOCAL database."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--snapshot", required=True, type=Path)
     args = parser.parse_args()
@@ -32,10 +42,13 @@ def main():
             psycopg.sql.SQL("CREATE DATABASE {}").format(psycopg.sql.Identifier(target))
         )
         try:
-
+            # Подменяет подключение загрузчика, чтобы данные попадали только в тестовую
+            # БД.
             def connect(_):
                 return psycopg.connect(**dict(settings, dbname=target))
 
+            # Сравнивает все исходные строки с записанными, сохраняя значимость
+            # повторов.
             def check(tables):
                 with connect(None) as conn:
                     for table, (columns, rows) in tables.items():
@@ -58,7 +71,7 @@ def main():
                 _support.replace_tables(None, tables)
                 check(tables)
                 check(other_source)
-                # Exercise values that must not be normalized or deduplicated.
+
                 edge_cases = {
                     "raw_test": (
                         ["TEXT", "VALUE"],
@@ -73,7 +86,7 @@ def main():
                 }
                 _support.replace_tables(None, edge_cases)
                 check(edge_cases)
-                # Fail during COPY and check that all source tables retain their previous data.
+
                 bad = {
                     table: (columns, list(rows))
                     for table, (columns, rows) in tables.items()
@@ -82,7 +95,7 @@ def main():
                 bad[first][1].pop()
                 last = max(bad)
                 corrupt = list(bad[last][1][0])
-                corrupt[0] = "\x00"  # PostgreSQL TEXT cannot contain NUL.
+                corrupt[0] = "\x00"
                 bad[last][1][0] = tuple(corrupt)
                 try:
                     _support.replace_tables(None, bad, allow_smaller=True)

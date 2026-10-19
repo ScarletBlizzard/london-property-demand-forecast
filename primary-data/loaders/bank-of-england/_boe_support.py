@@ -1,4 +1,9 @@
-"""Download files and copy CSV fields to PostgreSQL without transforming them."""
+# Общие операции загрузчика BoE вынесены сюда, чтобы не повторять их в каждом модуле:
+# скачивание ответов, работа с файлами и подключение к PostgreSQL.
+#
+# Для каждой выгрузки ведётся manifest.json — список файлов, их контрольных сумм и
+# пройденных шагов. Он позволяет продолжать работу после остановки и обнаруживать
+# изменённые файлы. Этот модуль не выбирает показатели и не преобразует их значения.
 
 import hashlib
 import http.client
@@ -14,18 +19,18 @@ from pathlib import Path
 from uuid import uuid4
 
 
+# Обрабатывает порции параллельно и отменяет ещё не начатые задачи при остановке.
 def parallel_map(function, items, workers):
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         yield from pool.map(function, items)
     finally:
-        # Do not execute thousands of queued requests after an error or Ctrl+C.
         pool.shutdown(wait=True, cancel_futures=True)
 
 
+# Хранит состояние одной выгрузки и согласует запись прогресса между потоками.
 class SnapshotStore:
-    """Cache exact HTTP responses and checkpoint progress for resumable downloads."""
-
+    # Создаёт новую папку выгрузки или открывает и проверяет существующую.
     def __init__(self, directory, resume=None):
         self.lock = threading.RLock()
         self.pending_files = 0
@@ -45,6 +50,7 @@ class SnapshotStore:
             )
             self.checkpoint()
 
+    # Сохраняет прогресс через временный файл, чтобы не оставить обрезанный JSON.
     def checkpoint(self, **updates):
         with self.lock:
             self.manifest.update(updates)
@@ -56,6 +62,7 @@ class SnapshotStore:
             temporary.replace(self.folder / "manifest.json")
             self.pending_files = 0
 
+    # Возвращает проверенный сохранённый ответ либо скачивает его и регистрирует файл.
     def get(self, url, name):
         if Path(name).name != name:
             raise ValueError("Invalid download filename")
@@ -69,19 +76,19 @@ class SnapshotStore:
             ):
                 raise ValueError(f"Cached file does not match request: {name}")
             return raw
-        # Each worker writes a distinct response file. Manifest writes are serialized.
+
         partial = {"files": {}}
         raw = fetch(url, self.folder, name, partial)
         with self.lock:
             self.manifest["files"][name] = partial["files"][name]
             self.pending_files += 1
-            # The all-series index can be large. Checkpoint every eight CSV
-            # responses; a forced termination can require re-fetching at most 7.
+
             if "series" not in self.manifest or self.pending_files >= 8:
                 self.checkpoint()
         return raw
 
 
+# Создаёт отдельную папку и начальное описание новой выгрузки.
 def new_snapshot(directory, source):
     timestamp = datetime.now(UTC)
     folder = (
@@ -97,8 +104,9 @@ def new_snapshot(directory, source):
     }
 
 
+# Скачивает исходный ответ, сохраняет его с контрольной суммой и повторяет временные
+# сетевые ошибки.
 def fetch(url, folder, name, manifest):
-    """Save the exact response bytes and provenance before interpreting the response."""
     request = urllib.request.Request(
         url,
         headers={
@@ -122,8 +130,6 @@ def fetch(url, folder, name, manifest):
             manifest["files"][name] = metadata
             return raw
         except urllib.error.HTTPError as exc:
-            # A 500 for a large BoE request is handled by splitting it in the
-            # caller. Retrying the same oversized query only repeats its timeout.
             if exc.code not in (429, 502, 503, 504) or attempt == 2:
                 raise
             if exc.code == 429:
@@ -142,12 +148,14 @@ def fetch(url, folder, name, manifest):
         time.sleep(2**attempt)
 
 
+# Записывает описание выгрузки в manifest.json.
 def save_manifest(folder, manifest):
     (folder / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
 
+# Читает описание выгрузки и проверяет источник и контрольные суммы сохранённых файлов.
 def read_snapshot(folder, source):
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     if manifest["source"] != source:
@@ -163,6 +171,7 @@ def read_snapshot(folder, source):
     return manifest
 
 
+# Собирает параметры PostgreSQL; значения из указанного env-файла имеют приоритет.
 def connection_settings(env_file):
     names = {
         "PGHOST": "host",
@@ -191,6 +200,7 @@ def connection_settings(env_file):
     return {names[key]: value for key, value in settings.items()}
 
 
+# Открывает соединение с PostgreSQL и при local_only разрешает только локальный сервер.
 def connect(env_file, local_only=False):
     import psycopg
 
@@ -198,7 +208,7 @@ def connect(env_file, local_only=False):
     if local_only:
         if settings["host"] not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("--local-only refuses a non-local PostgreSQL host")
-        # Also override PGHOSTADDR inherited by libpq from the environment.
+
         settings["hostaddr"] = "::1" if settings["host"] == "::1" else "127.0.0.1"
     print(
         f"Connecting to {settings['host']}:{settings.get('port', '5432')}/{settings['dbname']} as {settings['user']}",
@@ -209,12 +219,12 @@ def connect(env_file, local_only=False):
     )
 
 
+# Запускает команду, а при ошибке печатает короткое сообщение и завершает её с кодом 1.
 def run(main):
     try:
         main()
-    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - CLI boundary reports errors and exits.
-        # Connection errors can include server/user names, but never print the config or DSN.
+    except (Exception, KeyboardInterrupt) as exc:
         import sys
 
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

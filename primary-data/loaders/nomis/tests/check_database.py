@@ -1,4 +1,9 @@
-"""Exercise the loader in a newly created isolated schema; never write primary."""
+# Проверяет запись Nomis в настоящий PostgreSQL на небольшой части готовой выгрузки. Для
+# этого в указанной БД создаётся отдельная тестовая схема; таблицы primary не меняются.
+#
+# Скрипт сравнивает исходные и записанные поля, проверяет повторы, пустые строки,
+# компактную передачу и откат при ошибках. Это быстрая проверка механизма записи без
+# загрузки всего набора. После завершения созданная схема удаляется.
 
 import argparse
 import contextlib
@@ -16,8 +21,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_loader import _support, loader
 
 
+# Берёт образцы строк, запускает проверки в отдельной схеме и удаляет её после
+# завершения.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Exercise the loader in a newly created isolated schema; never write primary."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--snapshot", required=True, type=Path)
     parser.add_argument(
@@ -39,10 +48,12 @@ def main():
     }
     schema = "nomis_test_" + uuid4().hex
 
+    # Записывает тестовые данные в выделенную схему, скрывая обычный вывод загрузчика.
     def write(data, **options):
         with contextlib.redirect_stdout(io.StringIO()):
             _support.replace_tables(args.env_file, data, schema=schema, **options)
 
+    # Сравнивает имена столбцов и все строки тестовых таблиц, включая число повторов.
     def check(data):
         with psycopg.connect(**settings, connect_timeout=10) as conn:
             for name, (columns, rows) in data.items():
@@ -53,7 +64,6 @@ def main():
                 assert Counter(cursor.fetchall()) == Counter(rows), name
 
     with psycopg.connect(**settings, connect_timeout=10, autocommit=True) as admin:
-        # CREATE without IF NOT EXISTS proves this exact schema belongs to this run.
         admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
         try:
             other = {"unrelated": (["VALUE"], [("keep",)])}
@@ -78,7 +88,7 @@ def main():
             }
             write(edges)
             check(edges)
-            # Exercise constant, dictionary and literal payloads together, plus an all-constant page.
+
             labels = [
                 "",
                 'literal " quote  ',
@@ -134,7 +144,7 @@ def main():
                 raise AssertionError("Expected COPY failure")
             check(tables)
             check(other)
-            # Fail after some live test tables have already been replaced, not just during staging.
+
             function = sql.Identifier(schema, "skip_insert")
             admin.execute(
                 sql.SQL(

@@ -1,4 +1,10 @@
-"""Verify durable page retries, resume and atomic publication in an isolated schema."""
+# Проверяет, можно ли продолжить загрузку Nomis после обрыва, не потеряв строки и не
+# добавив дубли. Из готовой выгрузки делается небольшой образец, а затем намеренно
+# вызываются ошибки на разных этапах записи.
+#
+# Тесты проверяют сохранённые страницы, финальную замену таблиц и случай, когда COMMIT
+# уже прошёл, но подтверждение потерялось. Для работы нужны файлы выгрузки и PostgreSQL.
+# Запись идёт в отдельные тестовые схемы, которые удаляются после проверки.
 
 import argparse
 import csv
@@ -21,6 +27,7 @@ import _nomis_database as database
 from test_loader import _support, loader
 
 
+# Создаёт сжатую CSV-страницу из подготовленных тестовых строк.
 def encode(columns, rows):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
@@ -29,6 +36,8 @@ def encode(columns, rows):
     return gzip.compress(stream.getvalue().encode("utf-8"), mtime=0)
 
 
+# Собирает маленькую выгрузку из нескольких страниц и добавляет сложные текстовые
+# значения.
 def fixture(source, folder):
     original = _support.read_snapshot(source, "nomis")
     manifest = {
@@ -80,8 +89,11 @@ def fixture(source, folder):
     return manifest
 
 
+# Моделирует обрывы записи и проверяет продолжение загрузки в отдельной тестовой схеме.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Verify durable page retries, resume and atomic publication in an isolated schema."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--snapshot", required=True, type=Path)
     args = parser.parse_args()
@@ -91,6 +103,7 @@ def main():
     scratch.mkdir(exist_ok=True)
     owned_stages = {}
 
+    # Сравнивает результат с ожидаемыми столбцами и строками после очередного сценария.
     def check(expected):
         with psycopg.connect(**settings, connect_timeout=10) as conn:
             for table, (columns, rows) in expected.items():
@@ -115,7 +128,7 @@ def main():
             name: (columns, rows[:1]) for name, (columns, rows) in expected.items()
         }
         unrelated = {"unrelated": (["VALUE"], [("keep",)])}
-        # A one-dataset refresh must also leave the other configured Nomis tables intact.
+
         unrelated.update(
             {
                 name: (["VALUE"], [("keep original Nomis data",)])
@@ -203,7 +216,6 @@ def main():
                 flush=True,
             )
 
-            # A changed fixture proves rollback after an earlier live table was already inserted.
             first_dataset = next(
                 ds
                 for ds in manifest["datasets"]

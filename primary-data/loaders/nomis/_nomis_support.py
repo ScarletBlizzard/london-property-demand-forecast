@@ -1,4 +1,11 @@
-"""Download files and copy CSV/TSV fields to PostgreSQL without transforming them."""
+# Здесь собраны вспомогательные операции Nomis: параметры команд, скачивание файлов,
+# чтение CSV/TSV и подключение к PostgreSQL. Исходный текст сохраняется вместе с
+# пропусками, кавычками и повторяющимися строками.
+#
+# При передаче в БД одинаковые значения можно отправить один раз, а затем восстановить
+# все поля и повторы. Это уменьшает трафик, не меняя итоговые данные. Простая замена
+# таблиц в этом модуле нужна для старых выгрузок и тестов; загрузку с сохранением
+# страниц ведёт _nomis_database.py.
 
 import argparse
 import csv
@@ -17,6 +24,7 @@ from pathlib import Path
 from uuid import uuid4
 
 
+# Читает параметры команды и отклоняет несовместимые режимы, наборы и диапазоны лет.
 def arguments(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--from-year", type=int)
@@ -87,6 +95,7 @@ def arguments(description):
     return args
 
 
+# Создаёт папку для новой выгрузки и начальное описание её файлов.
 def new_snapshot(directory, source):
     timestamp = datetime.now(UTC)
     folder = (
@@ -102,8 +111,9 @@ def new_snapshot(directory, source):
     }
 
 
+# Скачивает ответ с повторами при временных сбоях и сохраняет его, при необходимости
+# сжимая в gzip.
 def fetch(url, folder, name, manifest):
-    """Save the exact response bytes and provenance before interpreting the response."""
     request = urllib.request.Request(
         url,
         headers={
@@ -123,7 +133,7 @@ def fetch(url, folder, name, manifest):
                 }
             if not raw:
                 raise ValueError(f"Empty response: {url}")
-            # Decompression returns the original response bytes, without changing any CSV field.
+
             stored = (
                 gzip.compress(raw, compresslevel=1, mtime=0)
                 if name.endswith(".gz")
@@ -151,6 +161,7 @@ def fetch(url, folder, name, manifest):
         time.sleep(2**attempt)
 
 
+# Сохраняет прогресс через временный файл, чтобы запись JSON не оборвалась на середине.
 def save_manifest(folder, manifest):
     temporary = folder / "manifest.json.part"
     temporary.write_text(
@@ -159,6 +170,7 @@ def save_manifest(folder, manifest):
     temporary.replace(folder / "manifest.json")
 
 
+# Проверяет принадлежность выгрузки Nomis и целостность всех сохранённых файлов.
 def read_snapshot(folder, source):
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     if manifest["source"] != source:
@@ -173,6 +185,7 @@ def read_snapshot(folder, source):
     return manifest
 
 
+# Считает контрольную сумму файла порциями, не читая его целиком в память.
 def file_hash(stream):
     digest = hashlib.sha256()
     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -180,6 +193,7 @@ def file_hash(stream):
     return digest.hexdigest()
 
 
+# Возвращает исходные байты страницы, распаковывая gzip при необходимости.
 def csv_bytes(path):
     return (
         gzip.decompress(path.read_bytes())
@@ -188,6 +202,7 @@ def csv_bytes(path):
     )
 
 
+# Читает CSV как текстовые поля и проверяет заголовки и длину строк.
 def read_csv(raw, required, allow_empty=False):
     reader = csv.reader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
     columns = next(reader, [])
@@ -201,20 +216,15 @@ def read_csv(raw, required, allow_empty=False):
         raise ValueError(
             "CSV columns must be nonempty, unique and fit PostgreSQL identifiers"
         )
-    # Empty physical lines are CSV separators, not records. Empty fields stay empty strings.
+
     rows = [tuple(row) for row in reader if row]
     if (not rows and not allow_empty) or any(len(row) != len(columns) for row in rows):
         raise ValueError("Empty or incomplete CSV")
     return columns, rows
 
 
+# Разбирает TSV Nomis, сохраняя внутренние кавычки и пробелы в текстовых полях.
 def read_tsv(raw, required, allow_empty=False):
-    """Decode Nomis TSV's literal text wrappers, including its unescaped interior quotes.
-
-    Nomis emits tabs between fields and wraps text in one pair of quotes, but does
-    not escape interior quotes (e.g. APS variable 1500). Do not repair the response
-    or use a permissive CSV parser, which would drop a literal quote from its name.
-    """
 
     def unwrap(value):
         return (
@@ -240,11 +250,13 @@ def read_tsv(raw, required, allow_empty=False):
     return columns, rows
 
 
+# Выбирает CSV- или TSV-разбор по имени сохранённого файла.
 def read_page(path, required):
     reader = read_tsv if path.name.endswith((".tsv", ".tsv.gz")) else read_csv
     return reader(csv_bytes(path), required)
 
 
+# Читает параметры PostgreSQL из окружения и переопределяет их указанным env-файлом.
 def connection_settings(env_file):
     names = {
         "PGHOST": "host",
@@ -273,6 +285,7 @@ def connection_settings(env_file):
     return {names[key]: value for key, value in settings.items()}
 
 
+# Открывает подключение к PostgreSQL с полученными параметрами.
 def connect(env_file):
     import psycopg
 
@@ -286,12 +299,8 @@ def connect(env_file):
     )
 
 
+# Передаёт порцию строк компактно и восстанавливает все исходные поля и дубли в БД.
 def copy_batch(cur, stage, transport, columns, rows):
-    """Transfer repeated text once per page, then restore exact fields inside PostgreSQL.
-
-    This only encodes the network payload. The source snapshot, staging table and
-    final table all retain the original text, including blanks and duplicates.
-    """
     from psycopg import sql
 
     fields = sql.SQL(", ").join(map(sql.Identifier, columns))
@@ -311,7 +320,7 @@ def copy_batch(cur, stage, transport, columns, rows):
             parameters.append(unique[0])
             continue
         dictionary = json.dumps(unique, ensure_ascii=False, separators=(",", ":"))
-        # Avoid dictionaries for unique identifiers, offsets and small values.
+
         encoded_size = len(dictionary) + len(rows) * (len(str(len(unique))) + 1)
         original_size = sum(len(value) + 1 for value in values)
         if encoded_size < original_size * 0.75:
@@ -324,7 +333,6 @@ def copy_batch(cur, stage, transport, columns, rows):
             expressions.append(field)
         payload_columns.append(field)
     if not payload_columns:
-        # A page of identical records must still retain every duplicate.
         cur.execute(
             sql.SQL("INSERT INTO {} ({}) SELECT {} FROM generate_series(1, %s)").format(
                 stage, fields, sql.SQL(", ").join(expressions)
@@ -350,8 +358,9 @@ def copy_batch(cur, stage, transport, columns, rows):
         raise ValueError("Incomplete transport decoding; rolling back all tables")
 
 
+# Подготавливает строки во временных таблицах и заменяет выбранные таблицы одной
+# транзакцией.
 def replace_tables(env_file, tables, allow_smaller=False, schema="primary"):
-    """Replace this source's tables with the exact CSV fields, all stored as TEXT."""
     from psycopg import sql
 
     if not tables or any(not rows for columns, rows in tables.values()):
@@ -426,7 +435,7 @@ def replace_tables(env_file, tables, allow_smaller=False, schema="primary"):
             if cur.fetchone()[0] != len(rows):
                 raise ValueError(f"{table}: incomplete COPY")
             staged.append((target, stage, fields, len(rows)))
-        # Live data stays readable while pages are copied and validated.
+
         cur.execute("SET LOCAL statement_timeout = '1800s'")
         for target, stage, fields, expected in staged:
             cur.execute(sql.SQL("TRUNCATE TABLE {}").format(target))
@@ -446,12 +455,12 @@ def replace_tables(env_file, tables, allow_smaller=False, schema="primary"):
         )
 
 
+# Запускает команду и выводит короткое сообщение при ошибке или остановке пользователем.
 def run(main):
     try:
         main()
-    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - CLI boundary reports errors and exits.
-        # Connection errors can include server/user names, but never print the config or DSN.
+    except (Exception, KeyboardInterrupt) as exc:
         import sys
 
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

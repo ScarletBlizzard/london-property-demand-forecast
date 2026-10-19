@@ -1,4 +1,10 @@
-"""Download original XML metadata and columnar CSV for all catalogue series."""
+# Здесь по готовому списку кодов скачиваются описания рядов в XML и их значения в CSV.
+# Описания нужны, чтобы знать частоту, единицы и начало и конец истории каждого
+# показателя.
+#
+# Большие запросы отправляются частями. Если BoE не справляется с запросом, код пробует
+# меньшую порцию рядов или дат. Уже сохранённые ответы можно использовать повторно. Поля
+# CSV остаются исходными; даты разбираются только для проверки покрытия.
 
 import csv
 import hashlib
@@ -31,23 +37,28 @@ COLUMNS = ["DATE", "SERIES", "VALUE"]
 EARLIEST = date(1963, 1, 1)
 
 
+# Записывает дату в формате, который принимает запрос к BoE.
 def api_date(value):
     return f"{value.day:02d}/{MONTHS[value.month - 1]}/{value.year}"
 
 
+# Разбирает дату из CSV для проверки периода, не меняя исходную строку.
 def csv_date(value):
     day, month, year = value.split()
     return date(int(year), MONTHS.index(month) + 1, int(day))
 
 
+# Делит список кодов на порции заданного размера.
 def chunks(values, size):
     return [values[offset : offset + size] for offset in range(0, len(values), size)]
 
 
+# Получает стабильную часть имени файла из набора кодов рядов.
 def identifier(codes):
     return hashlib.sha256(",".join(codes).encode("ascii")).hexdigest()[:20]
 
 
+# Извлекает описания из XML и проверяет, что они относятся ко всем запрошенным кодам.
 def parse_metadata(raw, expected):
     root = ET.fromstring(raw)
     if root.tag.split("}")[-1] != "Envelope":
@@ -79,6 +90,8 @@ def parse_metadata(raw, expected):
     return result
 
 
+# Читает три исходных поля CSV и останавливается при неверном заголовке или неполной
+# строке.
 def csv_rows(raw):
     reader = csv.reader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
     if next(reader, []) != COLUMNS:
@@ -91,6 +104,7 @@ def csv_rows(raw):
         yield tuple(row)
 
 
+# Проверяет коды и даты в CSV, считает строки и определяет фактические границы истории.
 def inspect_csv(raw, codes, start, end):
     counts = Counter()
     bounds = {}
@@ -115,12 +129,15 @@ def inspect_csv(raw, codes, start, end):
     }
 
 
+# Запоминает неудачный крупный запрос, чтобы при продолжении сразу использовать его
+# части.
 def mark_split(store, name):
     with store.lock:
         store.manifest.setdefault("split_requests", {})[name] = True
         store.checkpoint()
 
 
+# Определяет, стоит ли после этой ошибки пробовать запрос меньшего размера.
 def may_split(error):
     if isinstance(error, urllib.error.HTTPError):
         return error.code in (414, 500, 502, 503, 504)
@@ -129,9 +146,10 @@ def may_split(error):
     return True
 
 
+# Собирает XML-описания всех кодов, повторно используя подходящие сохранённые файлы.
 def metadata(store, codes, batch_size=150, workers=2):
     result, files, pending = {}, [], set(codes)
-    # Reuse completed XML responses even after changing technical batch sizes.
+
     candidates = [
         name
         for name in store.manifest["files"]
@@ -153,18 +171,16 @@ def metadata(store, codes, batch_size=150, workers=2):
                 files.append(name)
                 pending.difference_update(items)
         except ValueError, ET.ParseError:
-            # An earlier incomplete response is retained for provenance, but is
-            # never counted as successful metadata.
             continue
     print(f"Metadata already saved: {len(result)}/{len(codes)}", flush=True)
 
+    # Скачивает описания одной порции кодов; при подходящей ошибке делит её пополам.
     def batch(selected):
         name = f"metadata_{identifier(selected)}.xml"
         try:
             if name in store.manifest.get("split_requests", {}):
                 raise ValueError("Previously split request")
-            # FIRST_OBS/LAST_OBS describe the entire series even with a one-day
-            # request window. Do not make the metadata query scan all observations.
+
             url = (
                 ENDPOINT
                 + "?"
@@ -215,6 +231,7 @@ def metadata(store, codes, batch_size=150, workers=2):
     return result, files
 
 
+# Скачивает полную историю каждого ряда и возвращает список проверенных CSV-частей.
 def observations(store, series, batch_size=150, workers=2):
     groups = {}
     empty = []
@@ -235,6 +252,7 @@ def observations(store, series, batch_size=150, workers=2):
         )
     ]
 
+    # Получает CSV за нужные даты и при необходимости делит запрос по кодам или периоду.
     def batch(codes, start=None, end=None):
         start = start or min(
             date.fromisoformat(series[code]["FIRST_OBS"]) for code in codes
@@ -264,7 +282,7 @@ def observations(store, series, batch_size=150, workers=2):
                 raise ValueError("Split a long BoE request URL")
             raw = store.get(url, name)
             summary = inspect_csv(raw, codes, start, end)
-            # A requested bound is itself a published observation according to XML.
+
             for code in codes:
                 for field, position in (("FIRST_OBS", 0), ("LAST_OBS", 1)):
                     bound = series[code][field]

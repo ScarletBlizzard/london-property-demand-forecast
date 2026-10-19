@@ -1,4 +1,10 @@
-"""Read-only verification of the loaded Nomis snapshot and its full dimension coverage."""
+# Сверяет уже загруженные таблицы Nomis с файлами исходной выгрузки. Подключение к БД
+# открывается только для чтения: таблицы не создаются и не изменяются.
+#
+# Проверяются столбцы, число строк, наборы дат, районов и категорий. Значения
+# сравниваются на контрольных записях из разных частей выгрузки, а не построчно по всей
+# таблице. Результат сохраняется в JSON-отчёт, чтобы после большой загрузки было видно,
+# что именно проверено.
 
 import argparse
 import json
@@ -16,8 +22,11 @@ from _nomis_download import BOROUGHS
 from test_loader import _support, loader
 
 
+# Читает выгрузку и таблицы, выполняет сверки структуры и покрытия и записывает отчёт.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Read-only verification of the loaded Nomis snapshot and its full dimension coverage."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--snapshot", required=True, type=Path)
     parser.add_argument(
@@ -71,8 +80,7 @@ def main():
             groups = sql.SQL(", ").join(
                 sql.SQL("({})").format(sql.Identifier(name)) for name in dimensions
             )
-            # Hash the small category sets in one scan instead of sorting tens of
-            # millions of repeated strings separately for every DISTINCT aggregate.
+
             query = sql.SQL(
                 "SELECT GROUPING({}), {}, count(*), "
                 "count(*) FILTER (WHERE \"OBS_VALUE\" <> '') FROM {} "
@@ -105,8 +113,7 @@ def main():
                 dimensions,
             )
             samples = {}
-            # Nomis reuses some URNs across different APS variables. Page positions
-            # identify the exact source record without assuming URN uniqueness.
+
             key_columns = [
                 "DATE",
                 "GEOGRAPHY_TYPECODE",

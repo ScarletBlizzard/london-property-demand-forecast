@@ -1,4 +1,10 @@
-"""Bounded-memory PostgreSQL transport shared by the two source-specific commands."""
+# Общий механизм переноса готовых таблиц между двумя PostgreSQL. Его вызывают отдельные
+# transfer.py для BoE и Nomis; список нужных таблиц передаёт вызывающий загрузчик.
+#
+# Сначала проверяются локальные данные и сравниваются контрольные суммы всех полей.
+# Совпадающие таблицы пропускаются, остальные копируются порциями и заменяются по одной
+# транзакции на таблицу. Ошибка откатывает текущую таблицу; уже завершённые остаются.
+# Запросов к API источников здесь нет.
 
 import argparse
 import ipaddress
@@ -13,6 +19,7 @@ from psycopg import sql
 SCHEMA = "primary"
 
 
+# Читает параметры двух подключений, готовых выгрузок, режима сверки и файла отчёта.
 def arguments(description, multiple_snapshots=False):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -51,8 +58,8 @@ def arguments(description, multiple_snapshots=False):
     return parser.parse_args()
 
 
+# Фиксирует адрес подключения; источник должен быть локальным, без подмены из окружения.
 def endpoint(settings, local=False):
-    """Pin the address explicitly so an inherited PGHOSTADDR cannot redirect either connection."""
     settings = dict(settings)
     host = settings["host"]
     if local and host not in ("localhost", "127.0.0.1", "::1"):
@@ -70,6 +77,8 @@ def endpoint(settings, local=False):
     return settings
 
 
+# Открывает соединение; при readonly читает данные из согласованного состояния без
+# записи.
 def connect(settings, readonly=False):
     conn = psycopg.connect(
         **settings,
@@ -87,6 +96,7 @@ def connect(settings, readonly=False):
     return conn
 
 
+# Читает имена и типы столбцов таблицы для сравнения структуры.
 def columns(conn, table, schema=SCHEMA):
     return conn.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
@@ -95,14 +105,9 @@ def columns(conn, table, schema=SCHEMA):
     ).fetchall()
 
 
+# Считает число строк и суммы SHA-256 по всем полям; порядок строк не важен, повторы
+# учитываются.
 def fingerprint(conn, relation, fields):
-    """Order-independent checksum over every field, preserving NULL, blanks and multiplicity.
-
-    PostgreSQL hashes UTF-8 JSON arrays with SHA-256. Four signed 64-bit pieces
-    are summed as exact numeric values, so no extension or remote row download
-    is needed. Count plus the four sums is a multiset checksum, not a uniqueness
-    constraint or a mathematical proof of equality.
-    """
     sums = sql.SQL(", ").join(
         sql.SQL("coalesce(sum(('x' || substr(h, {}, 16))::bit(64)::bigint), 0)").format(
             sql.Literal(start)
@@ -117,6 +122,7 @@ def fingerprint(conn, relation, fields):
     return {"rows": row[0], "sha256_sums": [str(value) for value in row[1:]]}
 
 
+# Возвращает все периоды таблицы, чтобы обнаружить потерю истории.
 def dates(conn, relation):
     return {
         row[0]
@@ -126,12 +132,14 @@ def dates(conn, relation):
     }
 
 
+# Составляет SQL-описание столбцов с исходными именами и типом text.
 def definition(fields):
     return sql.SQL(", ").join(
         sql.SQL("{} text").format(sql.Identifier(field)) for field in fields
     )
 
 
+# Передаёт строки обычным COPY, в том числе когда нужно сохранить SQL NULL.
 def plain_copy(cur, stage, transport, fields, rows):
     with cur.copy(
         sql.SQL("COPY {} ({}) FROM STDIN").format(
@@ -142,6 +150,7 @@ def plain_copy(cur, stage, transport, fields, rows):
             copy.write_row(row)
 
 
+# Обновляет JSON-отчёт через временный файл после очередного шага.
 def save_report(path, report):
     if path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,10 +161,10 @@ def save_report(path, report):
         temporary.replace(path)
 
 
+# Сравнивает одну таблицу и при отличиях копирует, проверяет и заменяет её целиком.
 def transfer_table(
     source, target, table, spec, source_check, *, check_only, batch_size, copy_batch
 ):
-    """One atomic destination transaction per table; completed tables can be skipped on retry."""
     fields = spec["columns"]
     relation = sql.Identifier(SCHEMA, table)
     expected_columns = [(field, "text") for field in fields]
@@ -163,7 +172,7 @@ def transfer_table(
         if not check_only:
             target.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (table,))
         actual = columns(target, table)
-        # Keep normal readers working but exclude concurrent changes during comparison/copy.
+
         if actual and not check_only:
             target.execute(sql.SQL("LOCK TABLE {} IN SHARE MODE").format(relation))
             actual = columns(target, table)
@@ -233,7 +242,6 @@ def transfer_table(
                 )
             )
             while batch := reader.fetchmany(batch_size):
-                # Existing Nomis transport encodes strings; fall back to COPY for SQL NULLs.
                 sender = (
                     plain_copy
                     if any(value is None for row in batch for value in row)
@@ -254,7 +262,6 @@ def transfer_table(
             raise ValueError(f"{table}: staging checksum differs; rolling back")
         target.execute('CREATE SCHEMA IF NOT EXISTS "primary"')
         if old_shape:
-            # Only the explicitly recognized former BoE structure is migratable.
             target.execute(sql.SQL("DROP TABLE {}").format(relation))
             actual = []
         if not actual:
@@ -273,6 +280,8 @@ def transfer_table(
     return result
 
 
+# Проверяет обе БД и все исходные таблицы, затем выполняет перенос и сохраняет его
+# результат.
 def transfer(
     source_settings,
     target_settings,
@@ -308,7 +317,7 @@ def transfer(
     try:
         with connect(source_settings, readonly=True) as source:
             checks = {}
-            # Validate every requested local table before any destination table can be changed.
+
             for table, spec in tables.items():
                 if columns(source, table) != [
                     (field, "text") for field in spec["columns"]
@@ -337,7 +346,7 @@ def transfer(
                     == target.execute(identity_sql).fetchone()
                 ):
                     raise ValueError("Source and destination are the same database")
-                target.rollback()  # Each following table owns its complete transaction.
+                target.rollback()
                 for table, spec in tables.items():
                     report["tables"][table] = transfer_table(
                         source,

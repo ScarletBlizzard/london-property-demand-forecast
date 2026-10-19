@@ -1,4 +1,10 @@
-"""Local PostgreSQL migration/rollback checks and complete source-to-table verification."""
+# Проверки BoE с настоящим локальным PostgreSQL. По умолчанию скрипт создаёт отдельную
+# тестовую БД и проверяет загрузку, повторный запуск, переход со старой структуры и
+# откат при ошибке. После проверки тестовая БД удаляется.
+#
+# Есть и режим --verify-existing: он только читает выбранную локальную таблицу и сверяет
+# её с сохранёнными CSV по числу строк и контрольным суммам. Скрипт не разрешает
+# подключение к удалённому серверу.
 
 import argparse
 import hashlib
@@ -17,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_loader import loader, make_snapshot, support
 
 
+# Считает число строк и сумму хешей отдельно для каждого ряда, учитывая повторы.
 def fingerprint(rows):
-    """Order-independent count and SHA-256 multiset checksum for each series."""
     result = {}
     modulus = 1 << 256
     for row in rows:
@@ -31,6 +37,7 @@ def fingerprint(rows):
     return result
 
 
+# Сравнивает все CSV-строки с таблицей по контрольным суммам и проверяет её столбцы.
 def verify(conn, folder, manifest):
     expected = fingerprint(
         row
@@ -57,8 +64,11 @@ def verify(conn, folder, manifest):
     )
 
 
+# Выбирает сверку существующей таблицы или проверки с записью в отдельной тестовой БД.
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Local PostgreSQL migration/rollback checks and complete source-to-table verification."
+    )
     parser.add_argument("--env-file", required=True, type=Path)
     parser.add_argument("--snapshot", type=Path)
     parser.add_argument(
@@ -85,7 +95,8 @@ def main():
     with psycopg.connect(**dict(settings, dbname="postgres"), autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target)))
         try:
-
+            # Подменяет подключение загрузчика, направляя запись только в созданную
+            # тестовую БД.
             def connect(_, local_only=False):
                 return psycopg.connect(**dict(settings, dbname=target))
 
@@ -115,8 +126,6 @@ def main():
                         "INSERT INTO \"primary\".other_source_test VALUES ('keep')"
                     )
 
-                # Fail after the old table has been dropped and its replacement
-                # created: PostgreSQL must restore the old schema and rows.
                 class FailInsertConnection(psycopg.Connection):
                     def execute(self, query, *params, **kwargs):
                         text = (

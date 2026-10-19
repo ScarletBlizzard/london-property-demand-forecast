@@ -1,4 +1,11 @@
-"""Checkpointed raw Nomis uploads; committed pages survive connection failures."""
+# Полная выгрузка Nomis большая, и передача в БД может оборваться. Этот модуль сохраняет
+# каждую принятую страницу вместе с отметкой о завершении. Для этого в PostgreSQL
+# создаётся отдельная служебная схема.
+#
+# При повторном запуске подтверждённые страницы пропускаются. Когда все данные на месте,
+# выбранные таблицы в primary заменяются одной транзакцией. При ошибке прежние таблицы
+# остаются, а сохранённые страницы можно использовать для следующей попытки. После
+# успеха служебная схема удаляется.
 
 import gzip
 import hashlib
@@ -17,6 +24,7 @@ from psycopg import sql
 NETWORK_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
 
 
+# Отличает сбой соединения, который можно повторить, от ошибки самого SQL или данных.
 def _network_error(exc):
     if isinstance(exc, psycopg.InterfaceError):
         return True
@@ -27,6 +35,7 @@ def _network_error(exc):
     )
 
 
+# Описывает один файл страницы: набор, запрос, позицию, число строк и контрольную сумму.
 @dataclass(frozen=True)
 class Page:
     dataset: str
@@ -37,11 +46,13 @@ class Page:
     filename: str
     checksum: str
 
+    # Возвращает ключ страницы, по которому проверяется, была ли она уже записана.
     @property
     def key(self):
         return self.dataset, self.query, self.offset
 
 
+# Получает имя служебной схемы и метку её принадлежности конкретной выгрузке.
 def checkpoint_identity(manifest, target_schema):
     raw = json.dumps(
         [target_schema, manifest],
@@ -53,6 +64,7 @@ def checkpoint_identity(manifest, target_schema):
     return "nomis_stage_" + digest[:24], "nomis raw checkpoint v1 " + digest
 
 
+# Открывает соединение для передачи страниц с ограничениями времени ожидания.
 def _connect(settings):
     return psycopg.connect(
         **settings,
@@ -67,12 +79,14 @@ def _connect(settings):
     )
 
 
+# Составляет SQL-описание исходных столбцов, сохраняя для каждого тип text.
 def _definition(columns):
     return sql.SQL(", ").join(
         sql.SQL("{} text").format(sql.Identifier(c)) for c in columns
     )
 
 
+# Читает имена и типы столбцов существующей таблицы в исходном порядке.
 def _columns(cur, schema, table):
     cur.execute(
         "SELECT column_name, data_type FROM information_schema.columns "
@@ -82,6 +96,8 @@ def _columns(cur, schema, table):
     return cur.fetchall()
 
 
+# Проверяет структуру таблиц и, если не разрешено обратное, запрещает потерю строк и
+# периодов.
 def _validate_targets(cur, tables, schema, allow_smaller):
     for table, (columns, rows) in tables.items():
         actual = _columns(cur, schema, table)
@@ -99,6 +115,7 @@ def _validate_targets(cur, tables, schema, allow_smaller):
                 raise ValueError(f"{table}: replacement would remove existing periods")
 
 
+# Собирает список страниц полной выгрузки и проверяет, что между ними нет пропусков.
 def _pages(manifest):
     if manifest.get("version") != 2 or manifest.get("status") != "complete":
         raise ValueError("Checkpointed loading requires a complete v2 snapshot")
@@ -135,6 +152,7 @@ def _pages(manifest):
     return pages
 
 
+# Проверяет метку схемы, прежде чем использовать или удалять её как свою.
 def _assert_owned(cur, stage, marker):
     cur.execute(
         "SELECT obj_description(oid, 'pg_namespace') FROM pg_namespace WHERE nspname=%s",
@@ -146,6 +164,8 @@ def _assert_owned(cur, stage, marker):
         )
 
 
+# Создаёт или открывает служебные таблицы для строк, принятых страниц и состояния
+# загрузки.
 def _setup(conn, stage, marker, tables):
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT to_regnamespace(%s)", (stage,))
@@ -184,6 +204,8 @@ def _setup(conn, stage, marker, tables):
                 raise ValueError("Checkpoint columns differ from the source")
 
 
+# Записывает страницу и отметку о ней одной транзакцией; повтор после обрыва не
+# добавляет дубли.
 def _upload_page(page, context):
     if context["stop"].is_set():
         raise RuntimeError("Upload cancelled; committed checkpoints remain available")
@@ -211,8 +233,6 @@ def _upload_page(page, context):
                     context["connections"].append(local.conn)
             conn = local.conn
             with conn.transaction(), conn.cursor() as cur:
-                # The marker and raw rows commit together. An uncertain COMMIT can
-                # safely be retried: a visible marker means that page is complete.
                 cur.execute(
                     sql.SQL(
                         "INSERT INTO {} VALUES (%s,%s,%s,%s,%s) "
@@ -261,6 +281,7 @@ def _upload_page(page, context):
             time.sleep(2**attempt)
 
 
+# Находит незаписанные страницы и распределяет их между подключениями к БД.
 def _transfer(conn, pages, context, workers):
     stage = context["stage"]
     records = conn.execute(
@@ -312,6 +333,8 @@ def _transfer(conn, pages, context, workers):
             raise
 
 
+# Проверяет число подготовленных строк и заменяет все выбранные таблицы одной
+# транзакцией.
 def _finish(conn, stage, tables, target_schema, allow_smaller):
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SET LOCAL statement_timeout='1800s'")
@@ -366,6 +389,8 @@ def _finish(conn, stage, tables, target_schema, allow_smaller):
         )
 
 
+# Управляет загрузкой, продолжением после обрывов и удалением своей служебной схемы
+# после успеха.
 def load_snapshot(
     env_file,
     folder,
@@ -415,7 +440,7 @@ def load_snapshot(
                         _transfer(conn, pages, context, workers)
                         _finish(conn, stage, tables, target_schema, allow_smaller)
                     completed = True
-                # Only this snapshot's marked staging schema is removed.
+
                 with conn.cursor() as cur:
                     cur.execute("SELECT to_regnamespace(%s)", (stage,))
                     if cur.fetchone()[0] is not None:

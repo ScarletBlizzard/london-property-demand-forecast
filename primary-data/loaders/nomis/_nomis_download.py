@@ -1,4 +1,11 @@
-"""Metadata-driven, resumable Nomis download; no transformation of observations."""
+# Этот модуль отвечает за получение данных из API Nomis. Список четырёх наборов и
+# дополнительных исторических географий берётся из datasets.json, а даты и категории —
+# из справочников самого источника.
+#
+# Сначала составляется план для 33 районов Лондона и проверяется ожидаемое число строк.
+# Затем CSV/TSV скачиваются страницами с сохранением прогресса. Проверка версии данных
+# помогает не собрать одну выгрузку из разных публикаций Nomis. Подключения к БД здесь
+# нет.
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,10 +36,12 @@ TABLE_NAMES = {
 }
 
 
+# Достаёт список кодов категорий из JSON-справочника Nomis.
 def codelist(raw):
     return json.loads(raw)["structure"]["codelists"]["codelist"][0]["code"]
 
 
+# Читает отметки последнего обновления и пересмотра набора.
 def revision(raw):
     family = json.loads(raw)["structure"]["keyfamilies"]["keyfamily"][0]
     return {
@@ -42,6 +51,7 @@ def revision(raw):
     }
 
 
+# Проверяет номера записей, заявленное число строк и принадлежность районов Лондону.
 def check_page(columns, rows, offset, total):
     count_column = columns.index("RECORD_COUNT")
     offset_column = columns.index("RECORD_OFFSET")
@@ -59,12 +69,15 @@ def check_page(columns, rows, offset, total):
             )
 
 
+# Скачивает и сохраняет один JSON-справочник выбранного набора.
 def metadata(folder, manifest, dataset, path, name):
     return fetch(
         BASE + dataset + "/" + path, folder, dataset + "_" + name + ".json", manifest
     )
 
 
+# Выбирает все доступные категории и даты, проверяет географию и рассчитывает объём
+# запросов.
 def plan(args):
     configs = json.loads((DIRECTORY / "datasets.json").read_text(encoding="utf-8"))
     selected = getattr(args, "dataset", None)
@@ -146,7 +159,7 @@ def plan(args):
                 raise ValueError(
                     f"{dataset}/{query_id}: geography does not contain exactly the 33 London boroughs"
                 )
-            # Explicitly select ALL omitted dimensions; never use API default category filters.
+
             params = {
                 "geography": geography,
                 "date": ",".join(query_dates),
@@ -211,6 +224,7 @@ def plan(args):
     return folder, manifest
 
 
+# Проверяет, не изменил ли Nomis публикацию с момента составления плана.
 def verify_revisions(folder, manifest, suffix):
     for dataset, settings in manifest["datasets"].items():
         raw = metadata(
@@ -222,6 +236,7 @@ def verify_revisions(folder, manifest, suffix):
             )
 
 
+# Скачивает одну страницу, проверяет её полноту и возвращает сведения для продолжения.
 def fetch_page(folder, dataset, query, offset, page_size):
     local = {"files": {}}
     params = dict(query["params"], RecordLimit=str(page_size), RecordOffset=str(offset))
@@ -243,6 +258,7 @@ def fetch_page(folder, dataset, query, offset, page_size):
     return {"filename": name, "offset": offset, "rows": len(rows)}, local["files"]
 
 
+# Выполняет новый или сохранённый план, скачивая только ещё не полученные страницы.
 def download(args):
     if args.resume:
         folder, manifest = args.resume, read_snapshot(args.resume, "nomis")

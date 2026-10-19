@@ -1,4 +1,10 @@
-"""Collect the full raw dimensions of our configured Nomis datasets for London."""
+# Основная команда загрузчика Nomis: скачивает данные или читает уже готовую выгрузку,
+# после чего при необходимости записывает её в PostgreSQL.
+#
+# У населения, рынка труда, заработков и Claimant Count разные столбцы, поэтому каждый
+# набор попадает в свою таблицу primary. Строки читаются порциями, чтобы не держать всю
+# выгрузку в памяти. Здесь связываются скачивание, проверка файлов и запись в БД;
+# расчётов над показателями нет.
 
 import sys
 from pathlib import Path
@@ -14,9 +20,9 @@ from _nomis_download import (
 from _nomis_support import arguments, read_page, read_snapshot, replace_tables, run
 
 
+# Даёт повторный доступ к строкам сохранённого набора без загрузки всех файлов в память.
 class RawRows:
-    """Repeatable, bounded-memory access to unchanged CSV rows (including duplicates)."""
-
+    # Проверяет список страниц и запоминает столбцы, периоды и ожидаемое число строк.
     def __init__(self, folder, settings):
         self.folder = folder
         self.queries = settings.get("queries", [settings])
@@ -51,6 +57,7 @@ class RawRows:
     def __len__(self):
         return self.count
 
+    # Читает страницы по очереди и проверяет их структуру и непрерывность записей.
     def batches(self):
         for query in self.queries:
             offset = 0
@@ -74,6 +81,7 @@ class RawRows:
             yield from batch
 
 
+# Сопоставляет наборам из готовой выгрузки имена таблиц и доступ к исходным строкам.
 def raw_tables(folder, manifest):
     if manifest.get("version", 1) >= 2 and manifest.get("status") != "complete":
         raise ValueError("Snapshot is incomplete; use --resume before loading it")
@@ -84,8 +92,11 @@ def raw_tables(folder, manifest):
     return tables
 
 
+# Выбирает режим работы: план, скачивание, проверку файлов или загрузку в PostgreSQL.
 def main():
-    args = arguments(__doc__)
+    args = arguments(
+        "Collect the full raw dimensions of our configured Nomis datasets for London."
+    )
     folder, manifest = (
         (args.snapshot, read_snapshot(args.snapshot, "nomis"))
         if args.snapshot
