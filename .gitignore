@@ -13,5 +13,9 @@ venv/
 # Локальные настройки окружения
 .env
 
+# Локальные служебные файлы
+/CLAUDE.md
+/CODEX_HISTORY.md
+
 # macOS
 .DS_Store
