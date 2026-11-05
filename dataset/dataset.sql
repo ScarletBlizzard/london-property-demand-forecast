@@ -79,7 +79,7 @@ housing AS (
            percentile_cont(0.5) WITHIN GROUP (ORDER BY number_habitable_rooms::numeric)
                FILTER (WHERE number_habitable_rooms::numeric > 0)::numeric AS rooms_median,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY total_floor_area::numeric)
-               FILTER (WHERE property_type = 'Flat' AND total_floor_area::numeric > 0)::numeric AS flat_area_median,
+               FILTER (WHERE total_floor_area::numeric > 0)::numeric AS floor_area_median,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY current_energy_efficiency::numeric)
                FILTER (WHERE current_energy_efficiency::numeric > 0)::numeric AS energy_efficiency_median,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY energy_consumption_current::numeric)::numeric
@@ -105,7 +105,7 @@ SELECT s.month,
             ELSE t.ptal END AS ptal,
        round(1000 * c.crime_count / p.population, 2) AS crime_per_1000_lag2,
        h.rooms_median AS rooms_median_epc_prev_year,
-       round(h.flat_area_median, 2) AS flat_area_median_epc_prev_year,
+       round(h.floor_area_median, 2) AS floor_area_median_epc_prev_year,
        round(h.energy_efficiency_median, 2) AS energy_efficiency_median_epc_prev_year,
        round(h.energy_consumption_median, 2) AS energy_consumption_median_epc_prev_year,
        round(h.floor_height_median, 2) AS floor_height_median_epc_prev_year,
