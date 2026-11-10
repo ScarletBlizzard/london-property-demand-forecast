@@ -1,0 +1,4 @@
+# Зависимости Python для этого загрузчика.
+# psycopg нужен для чтения и записи PostgreSQL; вариант binary включает готовый драйвер.
+# Команды uv run --with-requirements из README подключают его на время запуска.
+psycopg[binary]>=3.2,<4

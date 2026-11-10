@@ -96,6 +96,27 @@ Greater London.
 | **Лицензия** | [Open Government License v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/) |
 
 
+**Таблица:** `"primary".bank_of_england__raw` — исходные поля `DATE`, `SERIES`, `VALUE`.
+[Описание столбцов и загрузчика](loaders/bank-of-england/README.md).
+
+## 👥 ONS / Nomis
+
+Четыре набора для 33 районов Лондона, включая City of London: оценки населения,
+рынок труда (APS), заработки по месту жительства (ASHE) и Claimant Count.
+Загружены все категории и меры этих наборов, включая пропуски и флаги качества;
+для ранних периодов сохранены исторические классификации районов.
+
+| | |
+| --- | --- |
+| **Владелец** | Office for National Statistics (ONS), сервис Nomis |
+| **Формат** | CSV/TSV |
+| **Данные** | [nomisweb.co.uk](https://www.nomisweb.co.uk/) |
+| **Лицензия** | [Open Government Licence, условия Nomis](https://www.nomisweb.co.uk/home/copyright.asp); атрибуция: Source: Office for National Statistics |
+
+**Таблицы в схеме `primary`:** `nomis__population_raw`, `nomis__labour_market_raw`,
+`nomis__earnings_raw`, `nomis__claimant_count_raw`.
+[Описание таблиц, столбцов и загрузчика](loaders/nomis/README.md).
+
 ## 🚇 TfL — Public Transport Accessibility Levels (PTAL)
 
 Индекс транспортной доступности Лондона от Transport for London. Считается из времени
