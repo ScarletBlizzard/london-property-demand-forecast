@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
-from _nomis_download import REQUIRED, TABLE_NAMES, check_page
+from _nomis_data import REQUIRED, TABLE_NAMES, check_page
 from _nomis_support import connection_settings, copy_batch, read_csv, read_tsv
 from psycopg import sql
 

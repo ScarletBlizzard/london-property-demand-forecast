@@ -1,8 +1,7 @@
 #!/bin/bash
 #
-# Загрузка TfL — Public Transport Accessibility Levels (PTAL), уровень LSOA,
-# в таблицы "primary".tfl__ptal_lsoa_2023 / tfl__ptal_lsoa_2015.
-# Использование: ./load.sh [2023|2015]   (без аргумента — оба релиза)
+# Загрузка TfL — Public Transport Accessibility Levels (PTAL).
+# Использование: ./load.sh [2023|2015|2015-borough] (без аргумента — все наборы).
 # Каждый запуск полностью заменяет таблицу: релиз в источнике неизменен,
 # пересчёта по месяцам тут нет, так что догружать нечего.
 set -euo pipefail
@@ -21,6 +20,7 @@ url_for() {
     case $1 in
         2023) echo "https://gis-tfl.opendata.arcgis.com/api/download/v1/items/a1ac85edd51a42c9a7f86e2763bb7bdf/csv?layers=30" ;;
         2015) echo "https://data.london.gov.uk/download/24rz6/77d9b319-931e-4090-bf8e-f578938bd352/LSOA2011%20AvPTAI2015.csv" ;;
+        2015-borough) echo "https://data.london.gov.uk/download/24rz6/8e520b81-dd06-4ce6-aaa0-972dccf84b57/Borough%20AvPTAI2015.csv" ;;
         *)    echo "неизвестный релиз: $1" >&2; return 2 ;;
     esac
 }
@@ -31,6 +31,9 @@ load() {
     url=$(url_for "$rel")
     csv=data/ptal-lsoa-$rel.csv
     tbl="$TBL_PREFIX$rel"
+    if [ "$rel" = 2015-borough ]; then
+        tbl='"primary".tfl__ptal_borough_2015'
+    fi
 
     # Оба источника отдают Last-Modified, по нему и сверяем. Файлы маленькие
     echo "==> [$rel] Проверяю версию в источнике"
@@ -61,7 +64,7 @@ load() {
     psql "$PGCONN" -w -v ON_ERROR_STOP=1 -f "sql/verify_$rel.sql"
 }
 
-if [ $# -gt 0 ]; then RELEASES=("$1"); else RELEASES=(2023 2015); fi
+if [ $# -gt 0 ]; then RELEASES=("$1"); else RELEASES=(2023 2015 2015-borough); fi
 for r in "${RELEASES[@]}"; do
-    case $r in 2023|2015) load "$r" ;; *) echo "неизвестный релиз: $r" >&2; exit 2 ;; esac
+    case $r in 2023|2015|2015-borough) load "$r" ;; *) echo "неизвестный релиз: $r" >&2; exit 2 ;; esac
 done

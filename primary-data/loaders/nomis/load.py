@@ -1,26 +1,11 @@
-# Основная команда загрузчика Nomis: скачивает данные или читает уже готовую выгрузку,
-# после чего при необходимости записывает её в PostgreSQL.
-#
-# У населения, рынка труда, заработков и Claimant Count разные столбцы, поэтому каждый
-# набор попадает в свою таблицу primary. Строки читаются порциями, чтобы не держать всю
-# выгрузку в памяти. Здесь связываются скачивание, проверка файлов и запись в БД;
-# расчётов над показателями нет.
+"""Загрузка готовых страниц Nomis в PostgreSQL."""
 
-import sys
 from pathlib import Path
 
-DIRECTORY = Path(__file__).resolve().parent
-sys.path.insert(0, str(DIRECTORY))
-from _nomis_download import (
-    REQUIRED,
-    TABLE_NAMES,
-    check_page,
-    download,
-)
+from _nomis_data import REQUIRED, TABLE_NAMES, check_page
 from _nomis_support import arguments, read_page, read_snapshot, replace_tables, run
 
 
-# Даёт повторный доступ к строкам сохранённого набора без загрузки всех файлов в память.
 class RawRows:
     # Проверяет список страниц и запоминает столбцы, периоды и ожидаемое число строк.
     def __init__(self, folder, settings):
@@ -35,7 +20,7 @@ class RawRows:
             self.count += total
             pages = query["pages"]
             if total and not pages:
-                raise ValueError("Nomis: incomplete download")
+                raise ValueError("Nomis: incomplete snapshot")
             if pages and isinstance(pages[0], dict):
                 next_offset = 0
                 for page in pages:
@@ -43,7 +28,7 @@ class RawRows:
                         raise ValueError("Nomis: incomplete page sequence")
                     next_offset += page["rows"]
                 if next_offset != total:
-                    raise ValueError("Nomis: incomplete download")
+                    raise ValueError("Nomis: incomplete snapshot")
             if pages and self.columns is None:
                 filename = (
                     pages[0]["filename"] if isinstance(pages[0], dict) else pages[0]
@@ -74,17 +59,20 @@ class RawRows:
                 offset += len(rows)
                 yield rows
             if offset != query["record_count"]:
-                raise ValueError("Nomis: incomplete download")
+                raise ValueError("Nomis: incomplete snapshot")
 
     def __iter__(self):
         for batch in self.batches():
             yield from batch
 
 
-# Сопоставляет наборам из готовой выгрузки имена таблиц и доступ к исходным строкам.
 def raw_tables(folder, manifest):
     if manifest.get("version", 1) >= 2 and manifest.get("status") != "complete":
-        raise ValueError("Snapshot is incomplete; use --resume before loading it")
+        raise ValueError("Snapshot is incomplete; provide a complete set of files")
+    if not manifest["datasets"] or not set(manifest["datasets"]) <= TABLE_NAMES.keys():
+        raise ValueError(
+            "The snapshot must contain one or more configured Nomis datasets"
+        )
     tables = {}
     for dataset, settings in manifest["datasets"].items():
         rows = RawRows(folder, settings)
@@ -92,43 +80,26 @@ def raw_tables(folder, manifest):
     return tables
 
 
-# Выбирает режим работы: план, скачивание, проверку файлов или загрузку в PostgreSQL.
 def main():
-    args = arguments(
-        "Collect the full raw dimensions of our configured Nomis datasets for London."
-    )
-    folder, manifest = (
-        (args.snapshot, read_snapshot(args.snapshot, "nomis"))
-        if args.snapshot
-        else download(args)
-    )
-    print(f"Raw files: {folder}", flush=True)
-    if args.plan:
-        return
+    args = arguments("Load saved Nomis CSV/TSV files into PostgreSQL.")
+    folder = args.snapshot
+    manifest = read_snapshot(folder, "nomis")
     tables = raw_tables(folder, manifest)
-    if args.download_only:
-        for table, (columns, rows) in tables.items():
-            count = sum(len(batch) for batch in rows.batches())
-            print(
-                f"Validated {table}: {count:,} rows, {len(columns)} original columns",
-                flush=True,
-            )
-    else:
-        if manifest.get("version", 1) >= 2:
-            from _nomis_database import load_snapshot
+    if manifest.get("version", 1) >= 2:
+        from _nomis_database import load_snapshot
 
-            load_snapshot(
-                args.env_file,
-                folder,
-                manifest,
-                tables,
-                allow_smaller=args.allow_smaller_replacement,
-                workers=args.db_workers,
-            )
-        else:
-            replace_tables(
-                args.env_file, tables, allow_smaller=args.allow_smaller_replacement
-            )
+        load_snapshot(
+            args.env_file,
+            folder,
+            manifest,
+            tables,
+            allow_smaller=args.allow_smaller_replacement,
+            workers=args.db_workers,
+        )
+    else:
+        replace_tables(
+            args.env_file, tables, allow_smaller=args.allow_smaller_replacement
+        )
 
 
 if __name__ == "__main__":

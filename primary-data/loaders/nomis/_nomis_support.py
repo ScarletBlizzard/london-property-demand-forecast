@@ -1,176 +1,43 @@
-# Здесь собраны вспомогательные операции Nomis: параметры команд, скачивание файлов,
-# чтение CSV/TSV и подключение к PostgreSQL. Исходный текст сохраняется вместе с
-# пропусками, кавычками и повторяющимися строками.
-#
-# При передаче в БД одинаковые значения можно отправить один раз, а затем восстановить
-# все поля и повторы. Это уменьшает трафик, не меняя итоговые данные. Простая замена
-# таблиц в этом модуле нужна для старых выгрузок и тестов; загрузку с сохранением
-# страниц ведёт _nomis_database.py.
+"""Чтение готовых CSV/TSV и запись исходных полей в PostgreSQL."""
 
 import argparse
 import csv
 import gzip
 import hashlib
-import http.client
 import io
 import json
 import os
-import ssl
-import time
-import urllib.error
-import urllib.request
-from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 
-# Читает параметры команды и отклоняет несовместимые режимы, наборы и диапазоны лет.
 def arguments(description):
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--from-year", type=int)
-    parser.add_argument("--to-year", type=int)
-    parser.add_argument(
-        "--dataset",
-        action="append",
-        help="Download only this configured dataset ID; repeat to select several (default: all)",
-    )
-    parser.add_argument(
-        "--download-only",
-        action="store_true",
-        help="Save and validate without connecting to PostgreSQL",
-    )
     parser.add_argument(
         "--snapshot",
         type=Path,
-        help="Load a previously downloaded snapshot without network requests",
-    )
-    parser.add_argument(
-        "--resume", type=Path, help="Continue a planned or interrupted full download"
-    )
-    parser.add_argument(
-        "--plan",
-        action="store_true",
-        help="Save metadata and exact API row counts without downloading all pages or writing to DB",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=2,
-        choices=range(1, 5),
-        help="Concurrent API page requests (default: 2)",
+        required=True,
+        help="Folder with CSV/TSV pages and manifest.json",
     )
     parser.add_argument(
         "--db-workers",
         type=int,
         default=4,
         choices=range(1, 5),
-        help="Checkpointed PostgreSQL upload connections (default: 4)",
+        help="PostgreSQL upload connections (default: 4)",
     )
     parser.add_argument(
         "--allow-smaller-replacement",
         action="store_true",
-        help="Explicitly allow replacing existing tables with fewer rows or dates",
+        help="Allow replacing existing tables with fewer rows or dates",
     )
     parser.add_argument(
         "--env-file",
         type=Path,
         help="Literal PG*=value file; overrides PG* environment variables",
     )
-    args = parser.parse_args()
-    if args.snapshot and (args.resume or args.plan):
-        parser.error("--snapshot cannot be combined with --resume or --plan")
-    if (args.snapshot or args.resume) and args.dataset:
-        parser.error(
-            "--snapshot/--resume already contains the selected datasets; do not combine with --dataset"
-        )
-    if (args.snapshot or args.resume) and (args.from_year or args.to_year):
-        parser.error(
-            "--snapshot/--resume already contains the selected periods; do not combine with year filters"
-        )
-    if args.from_year and args.to_year and args.from_year > args.to_year:
-        parser.error("--from-year must not exceed --to-year")
-    for year in (args.from_year, args.to_year):
-        if year is not None and not 1 <= year <= datetime.now().year:
-            parser.error("Years must be between 1 and the current year")
-    return args
+    return parser.parse_args()
 
 
-# Создаёт папку для новой выгрузки и начальное описание её файлов.
-def new_snapshot(directory, source):
-    timestamp = datetime.now(UTC)
-    folder = (
-        directory
-        / "data"
-        / (timestamp.strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8])
-    )
-    folder.mkdir(parents=True)
-    return folder, {
-        "source": source,
-        "downloaded_at": timestamp.isoformat(),
-        "files": {},
-    }
-
-
-# Скачивает ответ с повторами при временных сбоях и сохраняет его, при необходимости
-# сжимая в gzip.
-def fetch(url, folder, name, manifest):
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "AI-year-project/1.0 (public statistical data research)"
-        },
-    )
-    attempts = 5
-    for attempt in range(attempts):
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                raw = response.read()
-                metadata = {
-                    "url": url,
-                    "sha256": hashlib.sha256(raw).hexdigest(),
-                    "content_type": response.headers.get("Content-Type"),
-                    "last_modified": response.headers.get("Last-Modified"),
-                }
-            if not raw:
-                raise ValueError(f"Empty response: {url}")
-
-            stored = (
-                gzip.compress(raw, compresslevel=1, mtime=0)
-                if name.endswith(".gz")
-                else raw
-            )
-            metadata["sha256"] = hashlib.sha256(stored).hexdigest()
-            metadata["response_sha256"] = hashlib.sha256(raw).hexdigest()
-            temporary = folder / (name + ".part")
-            temporary.write_bytes(stored)
-            temporary.replace(folder / name)
-            manifest["files"][name] = metadata
-            return raw
-        except urllib.error.HTTPError as exc:
-            if exc.code not in (429, 500, 502, 503, 504) or attempt == attempts - 1:
-                raise
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            ConnectionError,
-            http.client.IncompleteRead,
-            ssl.SSLError,
-        ):
-            if attempt == attempts - 1:
-                raise
-        time.sleep(2**attempt)
-
-
-# Сохраняет прогресс через временный файл, чтобы запись JSON не оборвалась на середине.
-def save_manifest(folder, manifest):
-    temporary = folder / "manifest.json.part"
-    temporary.write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    temporary.replace(folder / "manifest.json")
-
-
-# Проверяет принадлежность выгрузки Nomis и целостность всех сохранённых файлов.
 def read_snapshot(folder, source):
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     if manifest["source"] != source:
@@ -185,7 +52,6 @@ def read_snapshot(folder, source):
     return manifest
 
 
-# Считает контрольную сумму файла порциями, не читая его целиком в память.
 def file_hash(stream):
     digest = hashlib.sha256()
     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -193,7 +59,6 @@ def file_hash(stream):
     return digest.hexdigest()
 
 
-# Возвращает исходные байты страницы, распаковывая gzip при необходимости.
 def csv_bytes(path):
     return (
         gzip.decompress(path.read_bytes())
@@ -202,7 +67,6 @@ def csv_bytes(path):
     )
 
 
-# Читает CSV как текстовые поля и проверяет заголовки и длину строк.
 def read_csv(raw, required, allow_empty=False):
     reader = csv.reader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True)
     columns = next(reader, [])
@@ -223,7 +87,6 @@ def read_csv(raw, required, allow_empty=False):
     return columns, rows
 
 
-# Разбирает TSV Nomis, сохраняя внутренние кавычки и пробелы в текстовых полях.
 def read_tsv(raw, required, allow_empty=False):
 
     def unwrap(value):
@@ -250,13 +113,11 @@ def read_tsv(raw, required, allow_empty=False):
     return columns, rows
 
 
-# Выбирает CSV- или TSV-разбор по имени сохранённого файла.
 def read_page(path, required):
     reader = read_tsv if path.name.endswith((".tsv", ".tsv.gz")) else read_csv
     return reader(csv_bytes(path), required)
 
 
-# Читает параметры PostgreSQL из окружения и переопределяет их указанным env-файлом.
 def connection_settings(env_file):
     names = {
         "PGHOST": "host",
@@ -285,7 +146,6 @@ def connection_settings(env_file):
     return {names[key]: value for key, value in settings.items()}
 
 
-# Открывает подключение к PostgreSQL с полученными параметрами.
 def connect(env_file):
     import psycopg
 
@@ -299,7 +159,6 @@ def connect(env_file):
     )
 
 
-# Передаёт порцию строк компактно и восстанавливает все исходные поля и дубли в БД.
 def copy_batch(cur, stage, transport, columns, rows):
     from psycopg import sql
 
@@ -358,8 +217,6 @@ def copy_batch(cur, stage, transport, columns, rows):
         raise ValueError("Incomplete transport decoding; rolling back all tables")
 
 
-# Подготавливает строки во временных таблицах и заменяет выбранные таблицы одной
-# транзакцией.
 def replace_tables(env_file, tables, allow_smaller=False, schema="primary"):
     from psycopg import sql
 
@@ -455,7 +312,6 @@ def replace_tables(env_file, tables, allow_smaller=False, schema="primary"):
         )
 
 
-# Запускает команду и выводит короткое сообщение при ошибке или остановке пользователем.
 def run(main):
     try:
         main()

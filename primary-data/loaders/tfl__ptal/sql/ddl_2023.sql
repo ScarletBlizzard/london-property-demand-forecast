@@ -33,15 +33,10 @@ comment on column "primary".tfl__ptal_lsoa_2023.lsoa21cd is
     'Внимание: часть кодов отличается от LSOA 2011, которыми размечен релиз 2015 — '
     'для сопоставления релизов нужен официальный lookup LSOA11 -> LSOA21 с geoportal.statistics.gov.uk';
 comment on column "primary".tfl__ptal_lsoa_2023.lsoa21nm is
-    'Имя LSOA по ONS: "<боро> <номер><буква>", например "City of London 001A". '
-    'Боро надёжнее выводить отсюда, а не из колонки borough: regexp_replace(lsoa21nm, ''\s+\S+$'', ''''). '
-    'Одна опечатка в источнике — "ZBarking and Dagenham" (1 LSOA), из-за неё получается 34 имени вместо 33';
+    'Название LSOA по ONS, сохранённое как в источнике';
 comment on column "primary".tfl__ptal_lsoa_2023.borough is
-    'Боро по версии TfL. НЕ ИСПОЛЬЗОВАТЬ: атрибуция битая у 434 LSOA из 4994 (8.7%), '
-    'причём всегда на соседний боро (Lambeth -> Southwark, Hounslow -> Richmond upon Thames и т.п.) — '
-    'похоже на артефакт пространственного джойна по центроиду. '
-    'Расхождение считает sql/verify_2023.sql. Правильный боро — из lsoa21nm или из lookup ONS. '
-    'Отличается от lsoa21nm ещё и написанием: здесь "Barking & Dagenham", у ONS "Barking and Dagenham"';
+    'Название района по данным TfL. Используется для агрегации PTAL по районам. '
+    'В названиях может использоваться & вместо and';
 comment on column "primary".tfl__ptal_lsoa_2023.mean_ai is
     'Accessibility Index, среднее по ячейкам сетки 100x100 м внутри LSOA. '
     'AI считается из времени пешком до остановок и станций, частоты сообщения на них '
