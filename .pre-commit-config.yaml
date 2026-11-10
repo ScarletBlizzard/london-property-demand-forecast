@@ -1,0 +1,31 @@
+repos:
+  # Линтер и форматтер Python
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Загрузчики написаны на bash с set -euo pipefail и пайпами — тут shellcheck
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        # SC1091 заэксклюжен из-за .env/db.env - они подставляются в рантайме и их нет на момент проверки,
+        args: [--exclude=SC1091]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Страховка от случайного коммита выгрузок или огромных файлов мимо .gitignore
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+        # Редакторы ноутбуков сохраняют .ipynb без финального перевода строки,
+        # хук его дописывает — и так по кругу на каждом коммите
+        exclude: \.ipynb$
+      - id: check-merge-conflict
+      - id: check-yaml

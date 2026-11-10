@@ -1,0 +1,17 @@
+# Скачанные выгрузки источников
+primary-data/loaders/*/data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Локальные настройки окружения
+.env
+
+# macOS
+.DS_Store
