@@ -49,15 +49,10 @@ def connection_settings(env_file):
     return {names[key]: value for key, value in settings.items()}
 
 
-def connect(env_file, local_only=False):
+def connect(env_file):
     import psycopg
 
     settings = connection_settings(env_file)
-    if local_only:
-        if settings["host"] not in ("localhost", "127.0.0.1", "::1"):
-            raise ValueError("--local-only refuses a non-local PostgreSQL host")
-
-        settings["hostaddr"] = "::1" if settings["host"] == "::1" else "127.0.0.1"
     print(
         f"Connecting to {settings['host']}:{settings.get('port', '5432')}/{settings['dbname']} as {settings['user']}",
         flush=True,

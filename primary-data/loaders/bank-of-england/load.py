@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 
 from _boe_data import COLUMNS, csv_rows
-from _boe_support import connect, connection_settings, read_snapshot, run
+from _boe_support import connect, read_snapshot, run
 
 TABLE = "bank_of_england__raw"
 
@@ -22,11 +22,6 @@ def arguments():
     )
     parser.add_argument(
         "--env-file", type=Path, help="Literal PG*=value connection settings"
-    )
-    parser.add_argument(
-        "--local-only",
-        action="store_true",
-        help="Refuse any PostgreSQL host except loopback",
     )
     return parser.parse_args()
 
@@ -56,17 +51,11 @@ def validate_snapshot(folder, manifest):
     return rows
 
 
-def replace_table(env_file, folder, manifest, local_only=False):
+def replace_table(env_file, folder, manifest):
     from psycopg import sql
 
-    if local_only and connection_settings(env_file)["host"] not in (
-        "localhost",
-        "127.0.0.1",
-        "::1",
-    ):
-        raise ValueError("--local-only refuses a non-local PostgreSQL host")
     expected = validate_snapshot(folder, manifest)
-    with connect(env_file, local_only=local_only) as conn:
+    with connect(env_file) as conn:
         conn.execute("SET LOCAL lock_timeout='10s'")
         conn.execute("SET LOCAL statement_timeout='120s'")
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (TABLE,))
@@ -109,7 +98,7 @@ def replace_table(env_file, folder, manifest, local_only=False):
 def main():
     args = arguments()
     manifest = read_snapshot(args.snapshot, "bank-of-england")
-    replace_table(args.env_file, args.snapshot, manifest, args.local_only)
+    replace_table(args.env_file, args.snapshot, manifest)
 
 
 if __name__ == "__main__":
